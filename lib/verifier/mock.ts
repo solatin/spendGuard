@@ -1,10 +1,9 @@
 // Mock Payment Verifier - x402 Demo
 // Simulates payment verification with replay prevention
+// Redis-backed storage for Vercel deployment
 
+import { redis, REDIS_KEYS } from "../redis";
 import { PaymentProof, VerifyResult } from "./types";
-
-// In-memory set to store used nonces for replay prevention
-const usedNonces = new Set<string>();
 
 /**
  * Verify a payment proof
@@ -15,15 +14,16 @@ const usedNonces = new Set<string>();
  * 3. Signature format is valid (mock check)
  * 4. Payer address format is valid (mock check)
  */
-export function verifyPayment(params: {
+export async function verifyPayment(params: {
   proof: PaymentProof;
   expectedNonce: string;
   expectedAmount: number;
-}): VerifyResult {
+}): Promise<VerifyResult> {
   const { proof, expectedNonce, expectedAmount } = params;
 
   // Check if nonce has been used (replay attack prevention)
-  if (usedNonces.has(proof.nonce)) {
+  const isUsed = await redis.sismember(REDIS_KEYS.USED_NONCES, proof.nonce);
+  if (isUsed) {
     return {
       valid: false,
       reason: "replay_attack: Nonce already used",
@@ -66,7 +66,7 @@ export function verifyPayment(params: {
   }
 
   // All checks passed - mark nonce as used
-  usedNonces.add(proof.nonce);
+  await redis.sadd(REDIS_KEYS.USED_NONCES, proof.nonce);
 
   return {
     valid: true,
@@ -82,32 +82,34 @@ export function verifyPayment(params: {
 /**
  * Check if a nonce has been used
  */
-export function isNonceUsed(nonce: string): boolean {
-  return usedNonces.has(nonce);
+export async function isNonceUsed(nonce: string): Promise<boolean> {
+  const isUsed = await redis.sismember(REDIS_KEYS.USED_NONCES, nonce);
+  return Boolean(isUsed);
 }
 
 /**
  * Clear all used nonces (for testing)
  */
-export function clearNonces(): void {
-  usedNonces.clear();
+export async function clearNonces(): Promise<void> {
+  await redis.del(REDIS_KEYS.USED_NONCES);
 }
 
 /**
  * Get count of used nonces (for debugging)
  */
-export function getUsedNonceCount(): number {
-  return usedNonces.size;
+export async function getUsedNonceCount(): Promise<number> {
+  const count = await redis.scard(REDIS_KEYS.USED_NONCES);
+  return count;
 }
 
 /**
  * Verify payment proof from header string
  */
-export function verifyPaymentFromHeader(
+export async function verifyPaymentFromHeader(
   header: string,
   expectedNonce: string,
   expectedAmount: number
-): VerifyResult {
+): Promise<VerifyResult> {
   try {
     const decoded = Buffer.from(header, "base64").toString("utf-8");
     const proof = JSON.parse(decoded) as PaymentProof;
@@ -120,4 +122,3 @@ export function verifyPaymentFromHeader(
     };
   }
 }
-

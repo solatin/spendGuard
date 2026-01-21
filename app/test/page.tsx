@@ -131,7 +131,7 @@ export default function TestPage() {
       setPaymentRequired(result1.x402_payment_required);
       updateStep(2, {
         status: "success",
-        detail: `Price: $${result1.x402_payment_required.price} ${result1.x402_payment_required.asset}`,
+        detail: `Price: ${result1.x402_payment_required.price} ${result1.x402_payment_required.asset}`,
       });
 
       // Step 4: Sign payment
@@ -502,18 +502,18 @@ export default function TestPage() {
             {/* Budget Card */}
             <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
               <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <span className="text-emerald-400">$</span> Live Budget
+                <span className="text-emerald-400">◈</span> Live Budget
               </h2>
               <div className="space-y-4">
                 <div className="flex items-end justify-between">
                   <div>
                     <div className="text-sm text-gray-500">Remaining</div>
                     <div className="text-3xl font-bold text-emerald-400">
-                      ${budget?.remaining.toFixed(4) || "0.0000"}
+                      {budget?.remaining.toFixed(4) || "0.0000"} USDC
                     </div>
                   </div>
                   <div className="text-sm text-gray-500">
-                    of ${budget?.daily_limit.toFixed(4) || "0.0000"}
+                    of {budget?.daily_limit.toFixed(4) || "0.0000"} USDC
                   </div>
                 </div>
                 <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
@@ -647,7 +647,7 @@ export default function TestPage() {
                   <div className="flex justify-between">
                     <span className="text-gray-400">Price:</span>
                     <span className="text-white font-mono">
-                      ${paymentRequired.price} {paymentRequired.asset}
+                      {paymentRequired.price} {paymentRequired.asset}
                     </span>
                   </div>
                   <div className="flex justify-between">

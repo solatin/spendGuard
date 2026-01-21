@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   const paymentProofHeader = request.headers.get("X-PAYMENT-PROOF");
 
   // Process the request through the mock provider
-  const result = processEmailSend(body, paymentProofHeader);
+  const result = await processEmailSend(body, paymentProofHeader);
 
   return NextResponse.json(result.body, { status: result.status });
 }

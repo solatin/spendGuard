@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { getLogs, clearLogs, getLogStats } from "@/lib/spendguard/audit";
 
 export async function GET() {
-  const logs = getLogs();
-  const stats = getLogStats();
+  const [logs, stats] = await Promise.all([getLogs(), getLogStats()]);
 
   return NextResponse.json({
     logs,
@@ -12,12 +11,10 @@ export async function GET() {
 }
 
 export async function DELETE() {
-  clearLogs();
+  await clearLogs();
 
   return NextResponse.json({
     success: true,
     message: "Audit logs cleared",
   });
 }
-
-

@@ -1,11 +1,8 @@
 // Budget Tracking - SpendGuard Control Plane
-// Manages daily spending limits and budget enforcement
+// Redis-backed storage for Vercel deployment
 
-import { getDb } from "../db";
+import { redis, REDIS_KEYS } from "../redis";
 
-/**
- * Budget status
- */
 export interface BudgetStatus {
   daily_limit: number;
   remaining: number;
@@ -13,99 +10,80 @@ export interface BudgetStatus {
   percentage_used: number;
 }
 
-/**
- * Budget check result
- */
 export interface BudgetCheckResult {
   allowed: boolean;
   reason: string;
   remaining: number;
 }
 
-interface BudgetRow {
+interface BudgetState {
   daily_limit: number;
   remaining: number;
 }
 
-/**
- * Get current budget status
- */
-export function getBudgetStatus(): BudgetStatus {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM budget WHERE id = 1").get() as BudgetRow;
+// Default budget values
+const DEFAULT_BUDGET: BudgetState = {
+  daily_limit: 1.0,
+  remaining: 1.0,
+};
 
-  const spent = row.daily_limit - row.remaining;
-  const percentage_used = (spent / row.daily_limit) * 100;
+async function getBudgetState(): Promise<BudgetState> {
+  const state = await redis.get<BudgetState>(REDIS_KEYS.BUDGET);
+  return state || { ...DEFAULT_BUDGET };
+}
 
+async function setBudgetState(state: BudgetState): Promise<void> {
+  await redis.set(REDIS_KEYS.BUDGET, state);
+}
+
+export async function getBudgetStatus(): Promise<BudgetStatus> {
+  const budgetState = await getBudgetState();
+  const spent = budgetState.daily_limit - budgetState.remaining;
   return {
-    daily_limit: row.daily_limit,
-    remaining: row.remaining,
+    daily_limit: budgetState.daily_limit,
+    remaining: budgetState.remaining,
     spent,
-    percentage_used,
+    percentage_used: (spent / budgetState.daily_limit) * 100,
   };
 }
 
-/**
- * Check if budget allows the requested amount
- */
-export function checkBudget(amount: number): BudgetCheckResult {
-  const status = getBudgetStatus();
-
-  if (amount > status.remaining) {
+export async function checkBudget(amount: number): Promise<BudgetCheckResult> {
+  const budgetState = await getBudgetState();
+  
+  if (amount > budgetState.remaining) {
     return {
       allowed: false,
-      reason: `budget_exceeded: $${amount.toFixed(4)} exceeds remaining $${status.remaining.toFixed(4)}`,
-      remaining: status.remaining,
+      reason: `budget_exceeded: $${amount.toFixed(4)} exceeds remaining $${budgetState.remaining.toFixed(4)}`,
+      remaining: budgetState.remaining,
     };
   }
 
   return {
     allowed: true,
     reason: "budget_check_passed",
-    remaining: status.remaining,
+    remaining: budgetState.remaining,
   };
 }
 
-/**
- * Deduct amount from budget
- * Should only be called after successful payment verification
- */
-export function deductBudget(amount: number): BudgetStatus {
-  const db = getDb();
-
-  db.prepare("UPDATE budget SET remaining = remaining - ? WHERE id = 1").run(amount);
-
+export async function deductBudget(amount: number): Promise<BudgetStatus> {
+  const budgetState = await getBudgetState();
+  budgetState.remaining = Math.max(0, budgetState.remaining - amount);
+  await setBudgetState(budgetState);
   return getBudgetStatus();
 }
 
-/**
- * Reset budget to daily limit
- */
-export function resetBudget(): BudgetStatus {
-  const db = getDb();
-  const status = getBudgetStatus();
+export async function resetBudget(): Promise<BudgetStatus> {
+  const budgetState = await getBudgetState();
+  budgetState.remaining = budgetState.daily_limit;
+  await setBudgetState(budgetState);
+  return getBudgetStatus();
+}
 
-  db.prepare("UPDATE budget SET remaining = daily_limit WHERE id = 1").run();
-
-  return {
-    ...status,
-    remaining: status.daily_limit,
-    spent: 0,
-    percentage_used: 0,
+export async function setDailyLimit(limit: number): Promise<BudgetStatus> {
+  const budgetState: BudgetState = {
+    daily_limit: limit,
+    remaining: limit,
   };
-}
-
-/**
- * Set daily budget limit
- */
-export function setDailyLimit(limit: number): BudgetStatus {
-  const db = getDb();
-
-  db.prepare("UPDATE budget SET daily_limit = ?, remaining = ? WHERE id = 1").run(
-    limit,
-    limit
-  );
-
+  await setBudgetState(budgetState);
   return getBudgetStatus();
 }
-

@@ -20,7 +20,7 @@ interface LogStats {
   total: number;
   approved: number;
   denied: number;
-  totalCost: number;
+  paymentRequired: number;
 }
 
 export default function DashboardPage() {
@@ -62,7 +62,8 @@ export default function DashboardPage() {
     setIsResetting(false);
   };
 
-  const formatCurrency = (value: number) => `$${value.toFixed(4)}`;
+  const formatCurrency = (value: number | undefined | null) => 
+    value != null ? `${value.toFixed(4)} USDC` : "—";
 
   return (
     <div className="min-h-screen bg-zinc-950 p-8">
@@ -97,9 +98,10 @@ export default function DashboardPage() {
             variant="danger"
           />
           <StatCard
-            label="Total Spent"
-            value={stats ? formatCurrency(stats.totalCost) : "—"}
-            icon="$"
+            label="Payment Required"
+            value={stats?.paymentRequired?.toString() || "—"}
+            icon="⏳"
+            variant="warning"
           />
         </div>
 
@@ -109,7 +111,7 @@ export default function DashboardPage() {
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 card-hover">
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-mono text-lg font-semibold text-zinc-100 flex items-center gap-2">
-                <span className="text-emerald-400">$</span>
+                <span className="text-emerald-400">◈</span>
                 Budget Status
               </h2>
               <button
@@ -145,7 +147,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex justify-between text-xs mt-2">
                     <span className="text-zinc-500">
-                      {budget.percentage_used.toFixed(1)}% used
+                      {budget.percentage_used?.toFixed(1) ?? "0"}% used
                     </span>
                     <span className="text-zinc-500">
                       Spent: {formatCurrency(budget.spent)}
@@ -231,33 +233,35 @@ function StatCard({
   label: string;
   value: string;
   icon: string;
-  variant?: "success" | "danger";
+  variant?: "success" | "danger" | "warning";
 }) {
+  const colorClass = 
+    variant === "success"
+      ? "text-emerald-400"
+      : variant === "danger"
+      ? "text-red-400"
+      : variant === "warning"
+      ? "text-amber-400"
+      : "text-zinc-500";
+
+  const valueColorClass =
+    variant === "success"
+      ? "text-emerald-400"
+      : variant === "danger"
+      ? "text-red-400"
+      : variant === "warning"
+      ? "text-amber-400"
+      : "text-zinc-100";
+
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 card-hover">
       <div className="flex items-center gap-2 mb-2">
-        <span
-          className={`text-sm ${
-            variant === "success"
-              ? "text-emerald-400"
-              : variant === "danger"
-              ? "text-red-400"
-              : "text-zinc-500"
-          }`}
-        >
+        <span className={`text-sm ${colorClass}`}>
           {icon}
         </span>
         <span className="text-xs text-zinc-500">{label}</span>
       </div>
-      <div
-        className={`font-mono text-2xl font-semibold ${
-          variant === "success"
-            ? "text-emerald-400"
-            : variant === "danger"
-            ? "text-red-400"
-            : "text-zinc-100"
-        }`}
-      >
+      <div className={`font-mono text-2xl font-semibold ${valueColorClass}`}>
         {value}
       </div>
     </div>

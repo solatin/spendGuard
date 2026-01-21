@@ -63,10 +63,10 @@ export async function executeSpendGuardFlow(
     cost_estimated: costEstimated,
   };
 
-  const policyResult = checkPolicy(policyRequest);
+  const policyResult = await checkPolicy(policyRequest);
 
   if (!policyResult.allowed) {
-    const logEntry = logRequest({
+    const logEntry = await logRequest({
       provider,
       action,
       task,
@@ -86,10 +86,10 @@ export async function executeSpendGuardFlow(
   // ═══════════════════════════════════════════════════════════
   // STEP 2: Budget Check
   // ═══════════════════════════════════════════════════════════
-  const budgetResult = checkBudget(costEstimated);
+  const budgetResult = await checkBudget(costEstimated);
 
   if (!budgetResult.allowed) {
-    const logEntry = logRequest({
+    const logEntry = await logRequest({
       provider,
       action,
       task,
@@ -113,7 +113,7 @@ export async function executeSpendGuardFlow(
     const proof = parsePaymentProofHeader(paymentProofHeader);
 
     if (!proof) {
-      const logEntry = logRequest({
+      const logEntry = await logRequest({
         provider,
         action,
         task,
@@ -131,10 +131,10 @@ export async function executeSpendGuardFlow(
     }
 
     // Get pending payment requirement
-    const pendingPayment = getPendingPayment(proof.nonce);
+    const pendingPayment = await getPendingPayment(proof.nonce);
 
     if (!pendingPayment) {
-      const logEntry = logRequest({
+      const logEntry = await logRequest({
         provider,
         action,
         task,
@@ -155,14 +155,14 @@ export async function executeSpendGuardFlow(
     }
 
     // Verify the payment proof
-    const verifyResult = verifyPayment({
+    const verifyResult = await verifyPayment({
       proof,
       expectedNonce: pendingPayment.nonce,
       expectedAmount: pendingPayment.price,
     });
 
     if (!verifyResult.valid) {
-      const logEntry = logRequest({
+      const logEntry = await logRequest({
         provider,
         action,
         task,
@@ -185,19 +185,19 @@ export async function executeSpendGuardFlow(
     // ═══════════════════════════════════════════════════════════
     // STEP 4: Payment Verified - Execute Provider Request
     // ═══════════════════════════════════════════════════════════
-    const providerResult = processEmailSend(
-      payload as EmailSendPayload,
+    const providerResult = await processEmailSend(
+      payload as unknown as EmailSendPayload,
       paymentProofHeader
     );
 
     if (providerResult.status === 200) {
       // Deduct budget AFTER successful execution
-      deductBudget(costEstimated);
+      await deductBudget(costEstimated);
 
       // Remove pending payment to prevent reuse
-      removePendingPayment(proof.nonce);
+      await removePendingPayment(proof.nonce);
 
-      const logEntry = logRequest({
+      const logEntry = await logRequest({
         provider,
         action,
         task,
@@ -220,7 +220,7 @@ export async function executeSpendGuardFlow(
     }
 
     // Provider returned error even with valid payment
-    const logEntry = logRequest({
+    const logEntry = await logRequest({
       provider,
       action,
       task,
@@ -243,12 +243,12 @@ export async function executeSpendGuardFlow(
   // ═══════════════════════════════════════════════════════════
   // STEP 5: No Payment - Get 402 from Provider
   // ═══════════════════════════════════════════════════════════
-  const providerResult = processEmailSend(payload as EmailSendPayload, null);
+  const providerResult = await processEmailSend(payload as unknown as EmailSendPayload, null);
 
   if (providerResult.status === 402) {
     const x402 = (providerResult.body as { x402: PaymentRequirement }).x402;
 
-    const logEntry = logRequest({
+    const logEntry = await logRequest({
       provider,
       action,
       task,
@@ -268,7 +268,7 @@ export async function executeSpendGuardFlow(
   }
 
   // Unexpected response
-  const logEntry = logRequest({
+  const logEntry = await logRequest({
     provider,
     action,
     task,
@@ -284,4 +284,3 @@ export async function executeSpendGuardFlow(
     log_id: logEntry.id,
   };
 }
-

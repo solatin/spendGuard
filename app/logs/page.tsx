@@ -167,7 +167,7 @@ export default function LogsPage() {
                       {log.task}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-sm text-zinc-300">
-                      ${log.cost.toFixed(4)}
+                      {log.cost.toFixed(4)} USDC
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span

@@ -4,7 +4,7 @@ import { clearNonces } from "@/lib/verifier/mock";
 import { clearAllPendingPayments } from "@/lib/provider/email";
 
 export async function GET() {
-  const status = getBudgetStatus();
+  const status = await getBudgetStatus();
 
   return NextResponse.json(status);
 }
@@ -22,8 +22,8 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "reset") {
-    resetBudget();
-    const status = getBudgetStatus();
+    await resetBudget();
+    const status = await getBudgetStatus();
 
     return NextResponse.json({
       success: true,
@@ -33,8 +33,8 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "clear_nonces") {
-    clearNonces();
-    clearAllPendingPayments();
+    await clearNonces();
+    await clearAllPendingPayments();
     
     return NextResponse.json({
       success: true,
@@ -47,5 +47,3 @@ export async function POST(request: Request) {
     { status: 400 }
   );
 }
-
-

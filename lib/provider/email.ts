@@ -1,6 +1,8 @@
 // Mock Email Provider - x402 Demo
 // Simulates an email provider that requires payment (HTTP 402)
+// Redis-backed storage for Vercel deployment
 
+import { redis } from "../redis";
 import {
   PaymentRequirement,
   ProviderResult,
@@ -17,19 +19,17 @@ export const EMAIL_PROVIDER_CONFIG: ProviderConfig = {
   payTo: "0xMockWalletAddress",
 };
 
-// In-memory store for pending payment requirements
-const pendingPayments = new Map<string, PaymentRequirement>();
-
-// Counter for mock email IDs
-let emailCounter = 1;
+// Redis key prefix for pending payments
+const PENDING_PAYMENTS_PREFIX = "spendguard:pending_payments:";
+const EMAIL_COUNTER_KEY = "spendguard:email_counter";
 
 /**
  * Create a payment requirement for an email send
  */
-export function createPaymentRequirement(
+export async function createPaymentRequirement(
   price: number = EMAIL_PROVIDER_CONFIG.pricePerCall,
   callbackUrl: string = "/api/provider/email/send"
-): PaymentRequirement {
+): Promise<PaymentRequirement> {
   const nonce = `nonce_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
   const requirement: PaymentRequirement = {
@@ -41,8 +41,8 @@ export function createPaymentRequirement(
     callbackUrl,
   };
 
-  // Store for later verification
-  pendingPayments.set(nonce, requirement);
+  // Store for later verification (expires in 1 hour)
+  await redis.set(`${PENDING_PAYMENTS_PREFIX}${nonce}`, requirement, { ex: 3600 });
 
   return requirement;
 }
@@ -53,13 +53,13 @@ export function createPaymentRequirement(
  * If no payment proof: returns 402 with payment requirement
  * If valid payment proof: executes and returns result
  */
-export function processEmailSend(
+export async function processEmailSend(
   payload: EmailSendPayload,
   paymentProofHeader: string | null
-): { status: 200 | 402; body: ProviderResult | { x402: PaymentRequirement } } {
+): Promise<{ status: 200 | 402; body: ProviderResult | { x402: PaymentRequirement } }> {
   // If no payment proof, return 402 with payment requirement
   if (!paymentProofHeader) {
-    const requirement = createPaymentRequirement();
+    const requirement = await createPaymentRequirement();
 
     return {
       status: 402,
@@ -82,7 +82,8 @@ export function processEmailSend(
   }
 
   // Execute the email send (mock)
-  const emailId = `email_${emailCounter++}`;
+  const counter = await redis.incr(EMAIL_COUNTER_KEY);
+  const emailId = `email_${counter}`;
   const result: ProviderResult = {
     success: true,
     data: {
@@ -104,28 +105,43 @@ export function processEmailSend(
 /**
  * Get a pending payment requirement by nonce
  */
-export function getPendingPayment(nonce: string): PaymentRequirement | undefined {
-  return pendingPayments.get(nonce);
+export async function getPendingPayment(nonce: string): Promise<PaymentRequirement | null> {
+  const payment = await redis.get<PaymentRequirement>(`${PENDING_PAYMENTS_PREFIX}${nonce}`);
+  return payment;
 }
 
 /**
  * Remove a pending payment (after successful verification)
  */
-export function removePendingPayment(nonce: string): void {
-  pendingPayments.delete(nonce);
+export async function removePendingPayment(nonce: string): Promise<void> {
+  await redis.del(`${PENDING_PAYMENTS_PREFIX}${nonce}`);
 }
 
 /**
  * Clear all pending payments (for testing)
  */
-export function clearAllPendingPayments(): void {
-  pendingPayments.clear();
+export async function clearAllPendingPayments(): Promise<void> {
+  // Scan and delete all pending payment keys
+  let cursor = "0";
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, { match: `${PENDING_PAYMENTS_PREFIX}*`, count: 100 });
+    cursor = nextCursor;
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } while (cursor !== "0");
 }
 
 /**
  * Get count of pending payments (for debugging)
  */
-export function getPendingPaymentCount(): number {
-  return pendingPayments.size;
+export async function getPendingPaymentCount(): Promise<number> {
+  let count = 0;
+  let cursor = "0";
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, { match: `${PENDING_PAYMENTS_PREFIX}*`, count: 100 });
+    cursor = nextCursor;
+    count += keys.length;
+  } while (cursor !== "0");
+  return count;
 }
-
