@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { getBudgetStatus, resetBudget } from "@/lib/budget";
+import { getBudgetStatus, resetBudget } from "@/lib/spendguard/budget";
+import { clearNonces } from "@/lib/verifier/mock";
+import { clearAllPendingPayments } from "@/lib/provider/email";
 
 export async function GET() {
   const status = getBudgetStatus();
@@ -30,8 +32,18 @@ export async function POST(request: Request) {
     });
   }
 
+  if (body.action === "clear_nonces") {
+    clearNonces();
+    clearAllPendingPayments();
+    
+    return NextResponse.json({
+      success: true,
+      message: "Payment nonces and pending payments cleared",
+    });
+  }
+
   return NextResponse.json(
-    { error: "Unknown action. Use { action: 'reset' }" },
+    { error: "Unknown action. Use { action: 'reset' } or { action: 'clear_nonces' }" },
     { status: 400 }
   );
 }

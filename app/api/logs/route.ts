@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLogs, clearLogs, getLogStats } from "@/lib/audit";
+import { getLogs, clearLogs, getLogStats } from "@/lib/spendguard/audit";
 
 export async function GET() {
   const logs = getLogs();

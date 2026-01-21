@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+// Mock Email Provider API - x402 Demo
+// Returns 402 Payment Required when no payment proof is provided
 
-// Mock Email Provider API
-// Simulates an external email service like SendGrid or MailerSend
+import { NextRequest, NextResponse } from "next/server";
+import { processEmailSend } from "@/lib/provider/email";
+import { EmailSendPayload } from "@/lib/provider/types";
 
-let emailCounter = 1;
-
-export async function POST(request: Request) {
-  let body: { to?: string; subject?: string; body?: string };
+export async function POST(request: NextRequest) {
+  let body: EmailSendPayload;
 
   try {
     body = await request.json();
@@ -17,32 +17,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const { to, subject, body: emailBody } = body;
+  // Get payment proof header if present
+  const paymentProofHeader = request.headers.get("X-PAYMENT-PROOF");
 
-  if (!to || !subject) {
-    return NextResponse.json(
-      { error: "Missing required fields: to, subject" },
-      { status: 400 }
-    );
-  }
+  // Process the request through the mock provider
+  const result = processEmailSend(body, paymentProofHeader);
 
-  // Simulate a small delay (real API would have network latency)
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  // Generate mock response
-  const emailId = `email_${emailCounter++}`;
-
-  return NextResponse.json(
-    {
-      status: "sent",
-      id: emailId,
-      to,
-      subject,
-      body: emailBody || "(no body)",
-      sent_at: new Date().toISOString(),
-    },
-    { status: 200 }
-  );
+  return NextResponse.json(result.body, { status: result.status });
 }
-
-
