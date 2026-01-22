@@ -6,8 +6,9 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/", label: "Home", icon: "◉" },
   { href: "/demo", label: "Demo", icon: "▶" },
-  { href: "/test", label: "Test Console", icon: "⚡" },
   { href: "/dashboard", label: "Dashboard", icon: "◈" },
+  { href: "/policy", label: "Policy", icon: "📋" },
+  { href: "/budget", label: "Budget", icon: "💰" },
   { href: "/logs", label: "Logs", icon: "☰" },
 ];
 
@@ -21,7 +22,7 @@ export default function Navigation() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-              <span className="text-emerald-400 font-mono text-lg">$</span>
+              <span className="text-emerald-400 text-lg">🛡️</span>
             </div>
             <span className="font-mono text-lg font-semibold text-zinc-100 tracking-tight">
               SpendGuard

@@ -1,46 +1,23 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import Mermaid from "./components/Mermaid";
 
-interface BudgetStatus {
-  daily_limit: number;
-  remaining: number;
-  percentage_used: number;
-}
+const FLOW_MERMAID = `sequenceDiagram
+  participant A as Agent/App
+  participant S as SpendGuard
+  participant P as Provider API
 
-interface LogStats {
-  total: number;
-  approved: number;
-  denied: number;
-}
+  A->>S: POST /execute (intent)
+  S->>S: policy + budget checks
+  S->>P: forward request (no payment)
+  P-->>S: 402 Payment Required (x402)
+  S-->>A: 402 forwarded (x402 metadata)
+  A->>S: retry with X-PAYMENT-PROOF
+  S->>S: verify payment proof (nonce + signature)
+  S->>P: execute (paid)
+  P-->>S: 200 OK
+  S-->>A: APPROVED + audit log`;
 
 export default function HomePage() {
-  const [budget, setBudget] = useState<BudgetStatus | null>(null);
-  const [stats, setStats] = useState<LogStats | null>(null);
-
-  const fetchData = useCallback(async () => {
-    const [budgetRes, logsRes] = await Promise.all([
-      fetch("/api/budget"),
-      fetch("/api/logs"),
-    ]);
-    const budgetData = await budgetRes.json();
-    const logsData = await logsRes.json();
-    setBudget(budgetData);
-    setStats(logsData.stats);
-  }, []);
-
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchData();
-    }, 0);
-    const interval = setInterval(fetchData, 3000);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
-  }, [fetchData]);
-
   return (
     <div className="min-h-screen bg-zinc-950">
       {/* Hero Section */}
@@ -103,33 +80,6 @@ export default function HomePage() {
               View Dashboard
             </Link>
           </div>
-
-          {/* Live Stats */}
-          {(budget || stats) && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto">
-              <QuickStat
-                label="Budget Remaining"
-                value={budget ? `${budget.remaining.toFixed(4)} USDC` : "—"}
-                status={
-                  budget && budget.percentage_used > 80 ? "warning" : "normal"
-                }
-              />
-              <QuickStat
-                label="Total Requests"
-                value={stats?.total?.toString() || "0"}
-              />
-              <QuickStat
-                label="Approved"
-                value={stats?.approved?.toString() || "0"}
-                status="success"
-              />
-              <QuickStat
-                label="Denied"
-                value={stats?.denied?.toString() || "0"}
-                status={stats && stats.denied > 0 ? "danger" : "normal"}
-              />
-            </div>
-          )}
         </div>
       </div>
 
@@ -137,7 +87,7 @@ export default function HomePage() {
       <div className="border-t border-zinc-800 bg-zinc-900/30">
         <div className="mx-auto max-w-5xl px-6 py-20">
           <h2 className="text-center font-mono text-2xl font-semibold text-zinc-100 mb-12">
-            How It Works
+            What this demo shows
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -158,27 +108,96 @@ export default function HomePage() {
             />
           </div>
 
-          {/* Architecture Diagram */}
-          <div className="mt-16 p-8 rounded-xl border border-zinc-800 bg-zinc-900/50">
-            <div className="flex items-center justify-center gap-4 text-sm font-mono overflow-x-auto">
-              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 whitespace-nowrap">
-                <span className="text-emerald-400">◉</span>
-                Agent / App
-              </div>
-              <div className="text-zinc-600">→</div>
-              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 whitespace-nowrap">
-                <span>$</span>
-                SpendGuard
-              </div>
-              <div className="text-zinc-600">→</div>
-              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 whitespace-nowrap">
-                <span className="text-amber-400">◈</span>
-                Provider API
+          {/* Instructions */}
+          <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+              <div className="font-mono text-sm text-zinc-200 mb-2">Guided demo</div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Use <span className="text-zinc-200 font-mono">Demo → Flow</span> for predefined scenarios (normal x402 flow,
+                policy violation, budget exhausted, replay attack). Each run auto-clears logs and resets state so it’s deterministic.
+              </p>
+              <div className="mt-4">
+                <Link
+                  href="/demo"
+                  className="inline-flex items-center gap-2 text-emerald-400 font-mono hover:text-emerald-300 transition-colors"
+                >
+                  Open Guided Flow <span>→</span>
+                </Link>
               </div>
             </div>
-            <p className="text-center text-zinc-500 text-sm mt-4">
-              Policy Check → Budget Check → Allow/Deny → Audit Log
-            </p>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+              <div className="font-mono text-sm text-zinc-200 mb-2">Custom testing</div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Use the other Demo tabs (<span className="text-zinc-200 font-mono">Agent / SpendGuard / Provider</span>) to craft custom requests,
+                inspect decisions, and observe provider behavior.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-4">
+                <Link
+                  href="/demo/agent"
+                  className="inline-flex items-center gap-2 text-emerald-400 font-mono hover:text-emerald-300 transition-colors"
+                >
+                  Open Custom Test <span>→</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Flow Visualization */}
+          <div className="mt-16 p-8 rounded-xl border border-zinc-800 bg-zinc-900/50">
+            <h3 className="font-mono text-lg font-semibold text-zinc-100 mb-4">
+              Flow (x402 + policy/budget enforcement)
+            </h3>
+
+            <div className="flex items-center justify-between gap-4 text-sm font-mono overflow-x-auto">
+              <div className="min-w-[190px] px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 whitespace-nowrap">
+                <div className="text-xs text-zinc-500">Client</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400">◉</span> Agent / App
+                </div>
+              </div>
+              <div className="text-zinc-600">→</div>
+              <div className="min-w-[220px] px-4 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 whitespace-nowrap">
+                <div className="text-xs text-emerald-400/70">Control plane</div>
+                <div className="flex items-center gap-2">
+                  <span>🛡️</span> SpendGuard
+                </div>
+              </div>
+              <div className="text-zinc-600">→</div>
+              <div className="min-w-[200px] px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 whitespace-nowrap">
+                <div className="text-xs text-zinc-500">Upstream</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400">◈</span> Provider API
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-400">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+                <div className="font-mono text-zinc-200 mb-2">Decision path</div>
+                <ul className="space-y-1">
+                  <li><span className="text-zinc-300 font-mono">1.</span> Policy check (allowlist + max price)</li>
+                  <li><span className="text-zinc-300 font-mono">2.</span> Budget check (remaining ≥ cost)</li>
+                  <li><span className="text-zinc-300 font-mono">3.</span> If no payment proof: forward to provider → receive 402</li>
+                  <li><span className="text-zinc-300 font-mono">4.</span> Forward 402 to agent (x402 metadata)</li>
+                  <li><span className="text-zinc-300 font-mono">5.</span> If payment proof: verify nonce & signature → execute → deduct budget</li>
+                </ul>
+              </div>
+
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+                <div className="font-mono text-zinc-200 mb-3">Mermaid diagram</div>
+
+                <Mermaid chart={FLOW_MERMAID} className="bg-zinc-950/40 border border-zinc-800 rounded-lg p-3 overflow-x-auto" />
+
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-zinc-400 font-mono">
+                    Show Mermaid source
+                  </summary>
+                  <pre className="mt-2 text-xs text-zinc-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                    {FLOW_MERMAID}
+                  </pre>
+                </details>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -187,39 +206,45 @@ export default function HomePage() {
       <div className="border-t border-zinc-800">
         <div className="mx-auto max-w-5xl px-6 py-20">
           <h2 className="text-center font-mono text-2xl font-semibold text-zinc-100 mb-4">
-            Demo Scenarios
+            Scenarios included
           </h2>
           <p className="text-center text-zinc-400 mb-12">
-            Try these scenarios in the Test Console
+            Available in Demo → Flow (guided scenarios)
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <ScenarioCard
               number="01"
-              title="Normal Flow"
-              description="Send a single email request. Approved and logged."
-              outcome="APPROVED"
+              title="Normal x402 Flow"
+              description="Intent → 402 → pay → execute."
+              outcome="MIXED"
             />
             <ScenarioCard
               number="02"
-              title="Cost Violation"
-              description="Request exceeds max price per call policy."
+              title="Policy Violation"
+              description="Invalid provider → DENY."
               outcome="DENIED"
             />
             <ScenarioCard
               number="03"
-              title="Budget Exhaustion"
-              description="Agent loop sends 20 rapid requests. Budget enforced."
-              outcome="MIXED"
+              title="Budget Exhausted"
+              description="Spend until remaining is ~0 → next request DENY."
+              outcome="DENIED"
+            />
+            <ScenarioCard
+              number="04"
+              title="Replay Attack"
+              description="Reuse payment proof nonce → DENY."
+              outcome="DENIED"
             />
           </div>
 
           <div className="text-center mt-12">
             <Link
-              href="/test"
+              href="/demo"
               className="inline-flex items-center gap-2 text-emerald-400 font-mono hover:text-emerald-300 transition-colors"
             >
-              Open Test Console
+              Open Guided Flow
               <span>→</span>
             </Link>
           </div>
@@ -231,38 +256,12 @@ export default function HomePage() {
         <div className="mx-auto max-w-5xl px-6">
           <div className="flex items-center justify-between text-sm text-zinc-500">
             <div className="flex items-center gap-2 font-mono">
-              <span className="text-emerald-400">$</span>
+              <span className="text-emerald-400">🛡️</span>
               SpendGuard Demo
             </div>
             <div>No blockchain. No real money. Pure control-plane demo.</div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickStat({
-  label,
-  value,
-  status = "normal",
-}: {
-  label: string;
-  value: string;
-  status?: "normal" | "success" | "warning" | "danger";
-}) {
-  const statusColors = {
-    normal: "text-zinc-100",
-    success: "text-emerald-400",
-    warning: "text-amber-400",
-    danger: "text-red-400",
-  };
-
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-center">
-      <div className="text-xs text-zinc-500 mb-1">{label}</div>
-      <div className={`font-mono text-xl font-semibold ${statusColors[status]}`}>
-        {value}
       </div>
     </div>
   );

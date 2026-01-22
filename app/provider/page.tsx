@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface ProviderExchange {
   id: string;
+  auditLogId: string;
   timestamp: string;
   kind: "payment_required" | "success";
   request: {
@@ -36,9 +38,13 @@ interface AuditLogEntry {
 }
 
 export default function ProviderInspectorPage() {
+  const searchParams = useSearchParams();
+  const selectedLogId = searchParams.get("logId"); // audit log id
   const [providerLogs, setProviderLogs] = useState<ProviderExchange[]>([]);
   const [emailCount, setEmailCount] = useState(0);
   const [isClearing, setIsClearing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
 
   const fetchLogs = useCallback(async () => {
@@ -50,13 +56,14 @@ export default function ProviderInspectorPage() {
     const transformed: ProviderExchange[] = [];
     let emailId = 1;
 
-    recentLogs.forEach((log, index) => {
-      const baseId = `prov_${index}`;
+    recentLogs.forEach((log) => {
+      const baseId = `prov_${log.id}`;
 
       if (log.decision === "PAYMENT_REQUIRED") {
         // One exchange: request (no proof) -> 402
         transformed.push({
           id: `${baseId}_402`,
+          auditLogId: log.id,
           timestamp: log.timestamp,
           kind: "payment_required",
           request: {
@@ -84,6 +91,7 @@ export default function ProviderInspectorPage() {
         // One exchange: request (with proof) -> 200
         transformed.push({
           id: `${baseId}_200`,
+          auditLogId: log.id,
           timestamp: log.timestamp,
           kind: "success",
           request: {
@@ -129,20 +137,32 @@ export default function ProviderInspectorPage() {
     });
 
     setProviderLogs(transformed);
+    setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchLogs();
-    }, 0);
-
-    const interval = setInterval(fetchLogs, 1500);
-
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
+    fetchLogs();
   }, [fetchLogs]);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await fetchLogs();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedLogId) return;
+    // Expand the exchange(s) derived from this audit log id
+    setExpandedLogs((prev) => {
+      const next = new Set(prev);
+      next.add(`prov_${selectedLogId}_402`);
+      next.add(`prov_${selectedLogId}_200`);
+      return next;
+    });
+  }, [selectedLogId]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -308,6 +328,16 @@ export default function ProviderInspectorPage() {
               )}
             </h2>
             <div className="flex items-center gap-4">
+              <div className="text-xs text-gray-600 font-mono">
+                {lastUpdated ? `Updated: ${lastUpdated}` : "Not loaded"}
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRefreshing ? "Refreshing..." : providerLogs.length > 0 ? "Refresh" : "Load"}
+              </button>
               {providerLogs.length > 0 && (
                 <button
                   onClick={handleClear}

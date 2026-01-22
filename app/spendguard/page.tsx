@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface AuditLogEntry {
   id: string;
@@ -40,12 +41,28 @@ interface LogStats {
 }
 
 export default function SpendGuardInspectorPage() {
+  const searchParams = useSearchParams();
+  const selectedLogId = searchParams.get("logId");
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [budget, setBudget] = useState<BudgetStatus | null>(null);
   const [stats, setStats] = useState<LogStats | null>(null);
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
   const [isClearing, setIsClearing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isEditingPolicy, setIsEditingPolicy] = useState(false);
+  const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<{
+    max_price_per_call: string;
+    allowed_providers: string;
+    allowed_actions: string;
+    allowed_tasks: string;
+  } | null>(null);
+  const [isEditingBudget, setIsEditingBudget] = useState(false);
+  const [isSavingBudget, setIsSavingBudget] = useState(false);
+  const [isResettingBudget, setIsResettingBudget] = useState(false);
+  const [budgetDailyLimitDraft, setBudgetDailyLimitDraft] = useState<string>("");
 
   const fetchData = useCallback(async () => {
     const [logsRes, policyRes, budgetRes] = await Promise.all([
@@ -62,20 +79,27 @@ export default function SpendGuardInspectorPage() {
     setStats(logsData.stats);
     setPolicy(policyData);
     setBudget(budgetData);
+    setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchData();
-    }, 0);
-    
-    const interval = setInterval(fetchData, 1500);
-    
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
+    fetchData();
   }, [fetchData]);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await fetchData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedLogId) return;
+    const found = logs.find((l) => l.id === selectedLogId) || null;
+    if (found) setSelectedLog(found);
+  }, [selectedLogId, logs]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -130,6 +154,102 @@ export default function SpendGuardInspectorPage() {
       console.error("Failed to clear SpendGuard DB:", error);
     } finally {
       setIsClearing(false);
+    }
+  };
+
+  const beginEditPolicy = () => {
+    if (!policy) return;
+    setPolicyDraft({
+      max_price_per_call: String(policy.max_price_per_call),
+      allowed_providers: policy.allowed_providers.join(", "),
+      allowed_actions: policy.allowed_actions.join(", "),
+      allowed_tasks: policy.allowed_tasks.join(", "),
+    });
+    setIsEditingPolicy(true);
+  };
+
+  const cancelEditPolicy = () => {
+    setIsEditingPolicy(false);
+    setPolicyDraft(null);
+  };
+
+  const savePolicy = async () => {
+    if (!policyDraft) return;
+    try {
+      setIsSavingPolicy(true);
+      const res = await fetch("/api/policy", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_price_per_call: Number(policyDraft.max_price_per_call),
+          allowed_providers: policyDraft.allowed_providers,
+          allowed_actions: policyDraft.allowed_actions,
+          allowed_tasks: policyDraft.allowed_tasks,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `save_failed: ${res.status}`);
+      }
+      setIsEditingPolicy(false);
+      setPolicyDraft(null);
+      await fetchData();
+    } catch (error) {
+      console.error("Failed to save policy:", error);
+    } finally {
+      setIsSavingPolicy(false);
+    }
+  };
+
+  const beginEditBudget = () => {
+    if (!budget) return;
+    setBudgetDailyLimitDraft(String(budget.daily_limit));
+    setIsEditingBudget(true);
+  };
+
+  const cancelEditBudget = () => {
+    setIsEditingBudget(false);
+    setBudgetDailyLimitDraft("");
+  };
+
+  const saveBudget = async () => {
+    try {
+      setIsSavingBudget(true);
+      const res = await fetch("/api/budget", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ daily_limit: Number(budgetDailyLimitDraft) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `save_failed: ${res.status}`);
+      }
+      setIsEditingBudget(false);
+      setBudgetDailyLimitDraft("");
+      await fetchData();
+    } catch (error) {
+      console.error("Failed to save budget:", error);
+    } finally {
+      setIsSavingBudget(false);
+    }
+  };
+
+  const resetBudgetRemaining = async () => {
+    try {
+      setIsResettingBudget(true);
+      const res = await fetch("/api/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      });
+      if (!res.ok) {
+        throw new Error(`reset_failed: ${res.status}`);
+      }
+      await fetchData();
+    } catch (error) {
+      console.error("Failed to reset budget:", error);
+    } finally {
+      setIsResettingBudget(false);
     }
   };
 
@@ -223,10 +343,22 @@ export default function SpendGuardInspectorPage() {
           <div className="space-y-6">
             {/* Policy Engine */}
             <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <span className="text-purple-400">📋</span> Policy Engine
-              </h2>
-              {policy && (
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <span className="text-purple-400">📋</span> Policy Engine
+                </h2>
+                {!isEditingPolicy && (
+                  <button
+                    onClick={beginEditPolicy}
+                    disabled={!policy}
+                    className="text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+
+              {policy && !isEditingPolicy && (
                 <div className="space-y-4 text-sm">
                   <div>
                     <div className="text-gray-500 mb-1">Max Price Per Call</div>
@@ -264,13 +396,82 @@ export default function SpendGuardInspectorPage() {
                   </div>
                 </div>
               )}
+
+              {isEditingPolicy && policyDraft && (
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <label className="text-gray-500 mb-1 block">Max Price Per Call (USDC)</label>
+                    <input
+                      value={policyDraft.max_price_per_call}
+                      onChange={(e) => setPolicyDraft({ ...policyDraft, max_price_per_call: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                      inputMode="decimal"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 mb-1 block">Allowed Providers (comma-separated)</label>
+                    <input
+                      value={policyDraft.allowed_providers}
+                      onChange={(e) => setPolicyDraft({ ...policyDraft, allowed_providers: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                      placeholder="email"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 mb-1 block">Allowed Actions (comma-separated)</label>
+                    <input
+                      value={policyDraft.allowed_actions}
+                      onChange={(e) => setPolicyDraft({ ...policyDraft, allowed_actions: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                      placeholder="send"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 mb-1 block">Allowed Tasks (comma-separated)</label>
+                    <input
+                      value={policyDraft.allowed_tasks}
+                      onChange={(e) => setPolicyDraft({ ...policyDraft, allowed_tasks: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                      placeholder="welcome_flow"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      onClick={savePolicy}
+                      disabled={isSavingPolicy}
+                      className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSavingPolicy ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={cancelEditPolicy}
+                      disabled={isSavingPolicy}
+                      className="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Budget Engine */}
             <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <span className="text-emerald-400">💰</span> Budget Engine
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <span className="text-emerald-400">💰</span> Budget Engine
+                </h2>
+                {!isEditingBudget && (
+                  <button
+                    onClick={beginEditBudget}
+                    disabled={!budget}
+                    className="text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
               {budget && (
                 <div className="space-y-4">
                   <div className="flex justify-between text-sm">
@@ -282,8 +483,19 @@ export default function SpendGuardInspectorPage() {
                     <span className="text-red-400 font-mono">{budget.spent.toFixed(4)} USDC</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Remaining</span>
-                    <span className="text-emerald-400 font-mono">{budget.remaining.toFixed(4)} USDC</span>
+                    <span className="text-gray-500">Remaining
+                      <button
+                        onClick={resetBudgetRemaining}
+                        disabled={isResettingBudget}
+                        className="ml-2 px-2 py-1 rounded-md bg-gray-800 hover:bg-gray-700 text-white text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isResettingBudget ? "Resetting..." : "Reset"}
+                      </button>
+                    </span>
+
+                    <span className="flex items-center gap-2">
+                      <span className="text-emerald-400 font-mono">{budget.remaining.toFixed(4)} USDC</span>
+                    </span>
                   </div>
                   <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
                     <div
@@ -293,6 +505,41 @@ export default function SpendGuardInspectorPage() {
                   </div>
                   <div className="text-xs text-gray-500 text-center">
                     {budget.percentage_used.toFixed(1)}% used
+                  </div>
+
+                </div>
+              )}
+
+              {isEditingBudget && budget && (
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <label className="text-gray-500 mb-1 block">Daily Limit (USDC)</label>
+                    <input
+                      value={budgetDailyLimitDraft}
+                      onChange={(e) => setBudgetDailyLimitDraft(e.target.value)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                      inputMode="decimal"
+                    />
+                    <div className="text-xs text-gray-600 mt-1">
+                      Saving a new daily limit also resets remaining to that value.
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={saveBudget}
+                      disabled={isSavingBudget}
+                      className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSavingBudget ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={cancelEditBudget}
+                      disabled={isSavingBudget}
+                      className="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               )}
@@ -312,6 +559,16 @@ export default function SpendGuardInspectorPage() {
                 )}
               </h2>
               <div className="flex items-center gap-4">
+                <div className="text-xs text-gray-600 font-mono">
+                  {lastUpdated ? `Updated: ${lastUpdated}` : "Not loaded"}
+                </div>
+                <button
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRefreshing ? "Refreshing..." : logs.length > 0 ? "Refresh" : "Load"}
+                </button>
                 {logs.length > 0 && (
                   <button
                     onClick={handleClear}
@@ -335,24 +592,22 @@ export default function SpendGuardInspectorPage() {
                   <div
                     key={log.id}
                     onClick={() => setSelectedLog(selectedLog?.id === log.id ? null : log)}
-                    className={`p-4 rounded-lg border cursor-pointer transition-all ${
-                      selectedLog?.id === log.id
-                        ? "bg-gray-800 border-cyan-700"
-                        : log.decision === "PAYMENT_REQUIRED"
+                    className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedLog?.id === log.id
+                      ? "bg-gray-800 border-cyan-700"
+                      : log.decision === "PAYMENT_REQUIRED"
                         ? "bg-amber-900/10 border-amber-800 hover:border-amber-700"
                         : log.decision === "APPROVED"
-                        ? "bg-emerald-900/15 border-emerald-800 hover:border-emerald-700"
-                        : "bg-gray-800/50 border-gray-700 hover:border-gray-600"
-                    }`}
+                          ? "bg-emerald-900/15 border-emerald-800 hover:border-emerald-700"
+                          : "bg-gray-800/50 border-gray-700 hover:border-gray-600"
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-gray-500 font-mono">{formatTime(log.timestamp)}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded ${
-                          log.decision === "PAYMENT_REQUIRED" 
-                            ? "bg-amber-900/50 text-amber-400" 
-                            : "bg-gray-700 text-gray-400"
-                        }`}>
+                        <span className={`text-xs px-2 py-0.5 rounded ${log.decision === "PAYMENT_REQUIRED"
+                          ? "bg-amber-900/50 text-amber-400"
+                          : "bg-gray-700 text-gray-400"
+                          }`}>
                           {getLogPhase(log)}
                         </span>
                       </div>
@@ -439,17 +694,17 @@ export default function SpendGuardInspectorPage() {
                             <div className="text-xs text-gray-500 mb-2">x402 Data Forwarded to Agent:</div>
                             <div className="bg-amber-950/50 border border-amber-800 rounded p-3">
                               <pre className="text-xs text-amber-300 font-mono overflow-x-auto">
-{JSON.stringify({
-  status: 402,
-  message: "Payment Required",
-  x402: {
-    price: log.cost,
-    asset: "USDC",
-    network: "base-sepolia",
-    nonce: log.payment_nonce,
-    payTo: "mock_wallet_address"
-  }
-}, null, 2)}
+                                {JSON.stringify({
+                                  status: 402,
+                                  message: "Payment Required",
+                                  x402: {
+                                    price: log.cost,
+                                    asset: "USDC",
+                                    network: "base-sepolia",
+                                    nonce: log.payment_nonce,
+                                    payTo: "mock_wallet_address"
+                                  }
+                                }, null, 2)}
                               </pre>
                             </div>
                             <p className="text-xs text-gray-500 mt-2 italic">

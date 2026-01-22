@@ -5,7 +5,7 @@ import { checkPolicy, PolicyCheckRequest } from "./policy";
 import { checkBudget, deductBudget } from "./budget";
 import { logRequest } from "./audit";
 import { parsePaymentProofHeader } from "../client/payment";
-import { verifyPayment } from "../verifier/mock";
+import { isNonceUsed, verifyPayment } from "../verifier/mock";
 import {
   processEmailSend,
   getPendingPayment,
@@ -126,6 +126,29 @@ export async function executeSpendGuardFlow(
       return {
         decision: "DENIED",
         reason: "invalid_payment_proof: Could not parse payment proof",
+        log_id: logEntry.id,
+      };
+    }
+
+    // Fast-path replay prevention: if nonce is already used, deny even if pending payment was deleted.
+    // This keeps the user-facing behavior consistent with "replay_attack" scenarios.
+    if (await isNonceUsed(proof.nonce)) {
+      const logEntry = await logRequest({
+        provider,
+        action,
+        task,
+        cost: costEstimated,
+        decision: "DENIED",
+        reason: "replay_attack: Nonce already used",
+        payload,
+        payment_nonce: proof.nonce,
+        payment_payer: proof.payer,
+        payment_verified: false,
+      });
+
+      return {
+        decision: "DENIED",
+        reason: "replay_attack: Nonce already used",
         log_id: logEntry.id,
       };
     }

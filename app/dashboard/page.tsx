@@ -28,6 +28,8 @@ export default function DashboardPage() {
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [stats, setStats] = useState<LogStats | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     const [budgetRes, policyRes, logsRes] = await Promise.all([
@@ -43,18 +45,21 @@ export default function DashboardPage() {
     setBudget(budgetData);
     setPolicy(policyData);
     setStats(logsData.stats);
+    setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchData();
-    }, 0);
-    const interval = setInterval(fetchData, 2000);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
+    fetchData();
   }, [fetchData]);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await fetchData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleResetBudget = async () => {
     setIsResetting(true);
@@ -75,12 +80,28 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="font-mono text-3xl font-bold text-zinc-100 mb-2">
-            Control Dashboard
-          </h1>
-          <p className="text-zinc-400">
-            Real-time overview of SpendGuard policy and budget status
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="font-mono text-3xl font-bold text-zinc-100 mb-2">
+                Control Dashboard
+              </h1>
+              <p className="text-zinc-400">
+                Overview of SpendGuard policy, budget, and audit outcomes
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 text-sm font-mono hover:bg-zinc-700 hover:border-zinc-600 transition-all disabled:opacity-50"
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
+              <div className="font-mono text-xs text-zinc-500">
+                {lastUpdated ? `Last updated: ${lastUpdated}` : "Not loaded"}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Stats Grid */}
@@ -220,7 +241,7 @@ export default function DashboardPage() {
               <span className="text-sm text-zinc-400">SpendGuard Active</span>
             </div>
             <span className="font-mono text-xs text-zinc-500">
-              Last updated: {new Date().toLocaleTimeString()}
+              {lastUpdated ? `Last updated: ${lastUpdated}` : "Not loaded"}
             </span>
           </div>
         </div>

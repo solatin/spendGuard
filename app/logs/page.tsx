@@ -17,23 +17,28 @@ interface AuditLogEntry {
 export default function LogsPage() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isClearing, setIsClearing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const fetchLogs = useCallback(async () => {
     const res = await fetch("/api/logs");
     const data = await res.json();
     setLogs(data.logs);
+    setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchLogs();
-    }, 0);
-    const interval = setInterval(fetchLogs, 1000);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
+    fetchLogs();
   }, [fetchLogs]);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await fetchLogs();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleClearLogs = async () => {
     setIsClearing(true);
@@ -67,13 +72,22 @@ export default function LogsPage() {
               Complete history of all API requests processed by SpendGuard
             </p>
           </div>
-          <button
-            onClick={handleClearLogs}
-            disabled={isClearing || logs.length === 0}
-            className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 text-sm font-mono hover:bg-zinc-700 hover:border-zinc-600 transition-all disabled:opacity-50"
-          >
-            {isClearing ? "Clearing..." : "Clear Logs"}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 text-sm font-mono hover:bg-zinc-700 hover:border-zinc-600 transition-all disabled:opacity-50"
+            >
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <button
+              onClick={handleClearLogs}
+              disabled={isClearing || logs.length === 0}
+              className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 text-sm font-mono hover:bg-zinc-700 hover:border-zinc-600 transition-all disabled:opacity-50"
+            >
+              {isClearing ? "Clearing..." : "Clear Logs"}
+            </button>
+          </div>
         </div>
 
         {/* Stats Bar */}
@@ -95,9 +109,8 @@ export default function LogsPage() {
             <span className="font-mono text-red-400">{deniedCount}</span>
           </div>
           <div className="flex-1" />
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-zinc-500">Live</span>
+          <div className="text-xs text-zinc-500 font-mono">
+            {lastUpdated ? `Last updated: ${lastUpdated}` : "Not loaded"}
           </div>
         </div>
 

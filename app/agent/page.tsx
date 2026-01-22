@@ -18,6 +18,13 @@ interface TimelineStep {
   request?: string;
   response?: string;
   timestamp: string;
+  executeRequest?: {
+    provider: string;
+    action: string;
+    task: string;
+    payload: Record<string, unknown>;
+  };
+  paymentProof?: Record<string, unknown>;
 }
 
 interface BudgetStatus {
@@ -25,8 +32,7 @@ interface BudgetStatus {
   remaining: number;
 }
 
-// Static agent payload
-const AGENT_PAYLOAD = {
+const DEFAULT_AGENT_REQUEST = {
   provider: "email",
   action: "send",
   task: "welcome_flow",
@@ -39,13 +45,125 @@ const AGENT_PAYLOAD = {
 
 export default function AgentPage() {
   const [budget, setBudget] = useState<BudgetStatus | null>(null);
+  const [isRefreshingBudget, setIsRefreshingBudget] = useState(false);
+  const [budgetLastUpdated, setBudgetLastUpdated] = useState<string | null>(null);
   const [steps, setSteps] = useState<TimelineStep[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [phase, setPhase] = useState<"idle" | "awaiting_payment" | "completed" | "denied">("idle");
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequirement | null>(null);
   const [currentPaymentProof, setCurrentPaymentProof] = useState<Record<string, unknown> | null>(null);
+  const [paymentProofText, setPaymentProofText] = useState<string>("");
+  const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [hasRestored, setHasRestored] = useState(false);
+
+  // Custom agent request editor state
+  const [provider, setProvider] = useState<string>(DEFAULT_AGENT_REQUEST.provider);
+  const [action, setAction] = useState<string>(DEFAULT_AGENT_REQUEST.action);
+  const [task, setTask] = useState<string>(DEFAULT_AGENT_REQUEST.task);
+  const [payloadText, setPayloadText] = useState<string>(
+    JSON.stringify(DEFAULT_AGENT_REQUEST.payload, null, 2)
+  );
+  const [payloadError, setPayloadError] = useState<string | null>(null);
+  const [focusedStepId, setFocusedStepId] = useState<string | null>(null);
+
+  const buildExecuteRequest = (): {
+    provider: string;
+    action: string;
+    task: string;
+    payload: Record<string, unknown>;
+  } | null => {
+    const p = provider.trim();
+    const a = action.trim();
+    const t = task.trim();
+    if (!p || !a || !t) {
+      setPayloadError("provider/action/task are required");
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(payloadText) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setPayloadError("Payload must be a JSON object");
+        return null;
+      }
+      setPayloadError(null);
+      return {
+        provider: p,
+        action: a,
+        task: t,
+        payload: parsed as Record<string, unknown>,
+      };
+    } catch {
+      setPayloadError("Invalid JSON payload");
+      return null;
+    }
+  };
+
+  const applyDraftFromExecuteRequest = (req: {
+    provider: string;
+    action: string;
+    task: string;
+    payload: Record<string, unknown>;
+  }) => {
+    setProvider(req.provider);
+    setAction(req.action);
+    setTask(req.task);
+    setPayloadText(JSON.stringify(req.payload ?? {}, null, 2));
+    setPayloadError(null);
+  };
+
+  const applyDraftFromPaymentProof = (proof: Record<string, unknown>) => {
+    setPaymentProofText(JSON.stringify(proof, null, 2));
+    setPaymentProofError(null);
+  };
+
+  // Persist custom request draft across navigation
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem("spendguard:agent_request_draft:v1");
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          provider?: string;
+          action?: string;
+          task?: string;
+          payloadText?: string;
+        };
+        if (typeof parsed.provider === "string") setProvider(parsed.provider);
+        if (typeof parsed.action === "string") setAction(parsed.action);
+        if (typeof parsed.task === "string") setTask(parsed.task);
+        if (typeof parsed.payloadText === "string") setPayloadText(parsed.payloadText);
+      } catch (error) {
+        console.warn("Failed to restore agent request draft:", error);
+      }
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "spendguard:agent_request_draft:v1",
+        JSON.stringify({ provider, action, task, payloadText })
+      );
+    } catch {
+      // ignore
+    }
+  }, [provider, action, task, payloadText]);
+
+  const resetRequestDraft = () => {
+    setProvider(DEFAULT_AGENT_REQUEST.provider);
+    setAction(DEFAULT_AGENT_REQUEST.action);
+    setTask(DEFAULT_AGENT_REQUEST.task);
+    setPayloadText(JSON.stringify(DEFAULT_AGENT_REQUEST.payload, null, 2));
+    setPayloadError(null);
+    try {
+      localStorage.removeItem("spendguard:agent_request_draft:v1");
+    } catch {
+      // ignore
+    }
+  };
 
   // Persist agent timeline across navigation (SpendGuard logs are already persisted in Redis)
   useEffect(() => {
@@ -100,20 +218,32 @@ export default function AgentPage() {
     const res = await fetch("/api/budget");
     const data = await res.json();
     setBudget(data);
+    setBudgetLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchBudget();
-    }, 0);
-    const interval = setInterval(fetchBudget, 1500);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
+    fetchBudget();
   }, [fetchBudget]);
 
+  const handleRefreshBudget = async () => {
+    try {
+      setIsRefreshingBudget(true);
+      await fetchBudget();
+    } finally {
+      setIsRefreshingBudget(false);
+    }
+  };
+
   const toggleExpand = (stepId: string) => {
+    setFocusedStepId(stepId);
+    const step = steps.find((s) => s.id === stepId);
+    if (step?.executeRequest) {
+      applyDraftFromExecuteRequest(step.executeRequest);
+    }
+    if (step?.paymentProof) {
+      applyDraftFromPaymentProof(step.paymentProof);
+    }
+
     setExpandedSteps((prev) => {
       const next = new Set(prev);
       if (next.has(stepId)) {
@@ -138,8 +268,8 @@ export default function AgentPage() {
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Sign mock payment proof
-  const signPaymentProof = (requirement: PaymentRequirement): string => {
-    const proof = {
+  const defaultPaymentProof = (requirement: PaymentRequirement) => {
+    return {
       nonce: requirement.nonce,
       payer: `mock_payer_${Date.now()}`,
       signature: `mock_signature_${requirement.nonce}_${Date.now()}`,
@@ -148,11 +278,31 @@ export default function AgentPage() {
       network: requirement.network,
       timestamp: new Date().toISOString(),
     };
-    return btoa(JSON.stringify(proof));
+  };
+
+  const buildPaymentProofHeader = (): { header: string; decoded: Record<string, unknown> } | null => {
+    try {
+      const parsed = JSON.parse(paymentProofText) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setPaymentProofError("Payment proof must be a JSON object");
+        return null;
+      }
+
+      const obj = parsed as Record<string, unknown>;
+      setPaymentProofError(null);
+      const header = btoa(JSON.stringify(obj));
+      return { header, decoded: obj };
+    } catch {
+      setPaymentProofError("Invalid JSON payment proof");
+      return null;
+    }
   };
 
   // Phase 1: Send Intent (no payment)
   const handleSendIntent = async () => {
+    setFocusedStepId("send_request");
+    const execReq = buildExecuteRequest();
+    if (!execReq) return;
     setIsRunning(true);
     setPhase("idle");
     setPaymentRequired(null);
@@ -167,10 +317,11 @@ export default function AgentPage() {
         name: "📤 Send Request",
         status: "active",
         timestamp: new Date().toISOString(),
+        executeRequest: execReq,
       });
       await delay(300);
 
-      const requestBody = JSON.stringify(AGENT_PAYLOAD, null, 2);
+      const requestBody = JSON.stringify(execReq, null, 2);
       updateStep("send_request", {
         request: `POST /api/spendguard/execute\nContent-Type: application/json\n\n${requestBody}`,
       });
@@ -178,7 +329,7 @@ export default function AgentPage() {
       const response = await fetch("/api/spendguard/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(AGENT_PAYLOAD),
+        body: JSON.stringify(execReq),
       });
 
       const result = await response.json();
@@ -214,6 +365,9 @@ export default function AgentPage() {
       if (result.decision === "PAYMENT_REQUIRED" && result.x402_payment_required) {
         const x402 = result.x402_payment_required;
         setPaymentRequired(x402);
+        const proof = defaultPaymentProof(x402);
+        setPaymentProofText(JSON.stringify(proof, null, 2));
+        setFocusedStepId("sign_proof");
 
         updateStep("receive_response", {
           status: "success",
@@ -246,29 +400,39 @@ export default function AgentPage() {
 
   // Phase 2: Send Payment Proof
   const handleSendPaymentProof = async () => {
+    setFocusedStepId("sign_proof");
+    const execReq = buildExecuteRequest();
+    if (!execReq) return;
     if (!paymentRequired) return;
 
     setIsRunning(true);
     setCurrentPaymentProof(null);
 
     try {
-      // Step 3: Agent signs payment proof (local action)
+      const proofBuilt = buildPaymentProofHeader();
+      if (!proofBuilt) {
+        setIsRunning(false);
+        return;
+      }
+
+      const { header: paymentProof, decoded: decodedProof } = proofBuilt;
+
+      // Step 3: Agent prepares payment proof (local action)
       addStep({
         id: "sign_proof",
-        name: "✍️ Sign Payment Proof",
+        name: "✍️ Prepare Payment Proof",
         status: "active",
         timestamp: new Date().toISOString(),
-        description: "Signing locally...",
+        description: "Preparing locally...",
       });
       await delay(400);
 
-      const paymentProof = signPaymentProof(paymentRequired);
-      const decodedProof = JSON.parse(atob(paymentProof));
       setCurrentPaymentProof(decodedProof);
 
       updateStep("sign_proof", {
         status: "success",
-        description: "Payment proof signed",
+        description: "Payment proof ready",
+        paymentProof: decodedProof as Record<string, unknown>,
         request: `Payment Requirement:\n${JSON.stringify({
           price: paymentRequired.price,
           asset: paymentRequired.asset,
@@ -276,7 +440,7 @@ export default function AgentPage() {
           nonce: paymentRequired.nonce,
           payTo: paymentRequired.payTo,
         }, null, 2)}`,
-        response: `Mock Payment Proof (signed):\n${JSON.stringify(decodedProof, null, 2)}`,
+        response: `Payment Proof (base64-encoded header, decoded below):\n${JSON.stringify(decodedProof, null, 2)}`,
       });
 
       // Step 4: Agent retries with payment proof
@@ -286,10 +450,11 @@ export default function AgentPage() {
         name: "📤 Retry with Payment",
         status: "active",
         timestamp: new Date().toISOString(),
+        executeRequest: execReq,
       });
       await delay(300);
 
-      const requestBody = JSON.stringify(AGENT_PAYLOAD, null, 2);
+      const requestBody = JSON.stringify(execReq, null, 2);
       updateStep("retry_request", {
         request: `POST /api/spendguard/execute\nContent-Type: application/json\nX-PAYMENT-PROOF: <base64-encoded>\n\n--- Payment Proof (decoded) ---\n${JSON.stringify(decodedProof, null, 2)}\n\n--- Request Body ---\n${requestBody}`,
       });
@@ -300,7 +465,7 @@ export default function AgentPage() {
           "Content-Type": "application/json",
           "X-PAYMENT-PROOF": paymentProof,
         },
-        body: JSON.stringify(AGENT_PAYLOAD),
+        body: JSON.stringify(execReq),
       });
 
       const result = await response.json();
@@ -352,7 +517,10 @@ export default function AgentPage() {
     setPhase("idle");
     setPaymentRequired(null);
     setCurrentPaymentProof(null);
+    setPaymentProofText("");
+    setPaymentProofError(null);
     setExpandedSteps(new Set());
+    setFocusedStepId(null);
     try {
       localStorage.removeItem("spendguard:agent_state:v1");
     } catch {
@@ -376,24 +544,29 @@ export default function AgentPage() {
           </p>
         </div>
 
-        {/* Agent Payload */}
-        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <span className="text-cyan-400">📦</span> My Payload (Static)
-          </h2>
-          <pre className="bg-gray-950 border border-gray-800 rounded-lg p-4 text-sm text-gray-300 font-mono overflow-x-auto">
-{JSON.stringify(AGENT_PAYLOAD, null, 2)}
-          </pre>
-        </div>
-
         {/* Controls */}
         <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <span className="text-emerald-400">▶</span> Actions
             </h2>
-            <div className="text-sm text-gray-500">
-              Budget: <span className="text-emerald-400 font-mono">{budget?.remaining.toFixed(4) || "0.0000"} USDC</span>
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-gray-500">
+                Budget:{" "}
+                <span className="text-emerald-400 font-mono">
+                  {budget?.remaining.toFixed(4) || "0.0000"} USDC
+                </span>
+              </div>
+              <div className="text-xs text-gray-600 font-mono">
+                {budgetLastUpdated ? `Updated: ${budgetLastUpdated}` : "Loading..."}
+              </div>
+              <button
+                onClick={handleRefreshBudget}
+                disabled={isRefreshingBudget || isRunning}
+                className="text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRefreshingBudget ? "Refreshing..." : "Refresh"}
+              </button>
             </div>
           </div>
 
@@ -436,6 +609,71 @@ export default function AgentPage() {
             </button>
           </div>
 
+          {/* Composer (fixed location) */}
+          {(steps.length === 0 || focusedStepId === "send_request" || focusedStepId === "retry_request") && (
+            <div className="mt-4 p-4 bg-gray-950/40 border border-gray-800 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span className="text-cyan-400">📦</span>
+                  What I will send
+                </div>
+                <button
+                  onClick={resetRequestDraft}
+                  className="text-xs text-gray-500 hover:text-white transition-colors"
+                >
+                  Reset to default
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">provider</label>
+                  <input
+                    value={provider}
+                    onChange={(e) => setProvider(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    placeholder="email"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">action</label>
+                  <input
+                    value={action}
+                    onChange={(e) => setAction(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    placeholder="send"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">task</label>
+                  <input
+                    value={task}
+                    onChange={(e) => setTask(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    placeholder="welcome_flow"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-500">payload (JSON object)</label>
+                  {payloadError ? (
+                    <span className="text-xs text-red-400">{payloadError}</span>
+                  ) : (
+                    <span className="text-xs text-gray-600">valid</span>
+                  )}
+                </div>
+                <textarea
+                  value={payloadText}
+                  onChange={(e) => setPayloadText(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 font-mono overflow-x-auto min-h-[160px]"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Payment Required Banner */}
           {paymentRequired && phase === "awaiting_payment" && (
             <div className="mt-4 p-4 bg-amber-900/30 border border-amber-700 rounded-lg">
@@ -458,11 +696,45 @@ export default function AgentPage() {
             </div>
           )}
 
+          {/* Composer (same location) - Payment Proof */}
+          {paymentRequired && phase === "awaiting_payment" && focusedStepId === "sign_proof" && (
+            <div className="mt-4 p-4 bg-gray-950/40 border border-gray-800 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span className="text-purple-300">🔐</span>
+                  What I will pay with
+                </div>
+                <button
+                  onClick={() => {
+                    const proof = defaultPaymentProof(paymentRequired);
+                    setPaymentProofText(JSON.stringify(proof, null, 2));
+                    setPaymentProofError(null);
+                  }}
+                  className="text-xs text-gray-500 hover:text-white transition-colors"
+                >
+                  Regenerate
+                </button>
+              </div>
+              <div className="text-xs text-gray-500 mb-2">
+                This will be base64-encoded and sent as <span className="font-mono text-gray-200">X-PAYMENT-PROOF</span>.
+              </div>
+              {paymentProofError && (
+                <div className="text-xs text-red-400 mb-2">{paymentProofError}</div>
+              )}
+              <textarea
+                value={paymentProofText}
+                onChange={(e) => setPaymentProofText(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-purple-200 font-mono overflow-x-auto min-h-[160px]"
+                spellCheck={false}
+              />
+            </div>
+          )}
+
           {/* Current Payment Proof Display */}
           {currentPaymentProof && (
             <div className="mt-4 p-4 bg-purple-900/30 border border-purple-700 rounded-lg">
               <div className="flex items-center gap-2 text-purple-400 font-semibold mb-3">
-                🔐 Mock Payment Proof (Signed)
+                🔐 Payment Proof (Used)
               </div>
               <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-purple-300 font-mono overflow-x-auto">
 {JSON.stringify(currentPaymentProof, null, 2)}
@@ -518,7 +790,7 @@ export default function AgentPage() {
                           step.status === "success"
                             ? "bg-emerald-600 border-emerald-400 text-white"
                             : step.status === "error"
-                            ? "bg-red-500/20 border-red-500 text-red-400"
+                            ? "bg-red-600 border-red-400 text-white"
                             : step.status === "active"
                             ? "bg-cyan-500/20 border-cyan-500 text-cyan-400 animate-pulse"
                             : "bg-gray-800 border-gray-600 text-gray-400"
