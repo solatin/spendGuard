@@ -161,3 +161,5 @@ export function useSpendGuardData(pollInterval: number = 2000) {
   return { fetchAll, fetchBudget, fetchPolicy, fetchLogs };
 }
 
+
+

@@ -177,10 +177,10 @@ export default function ProviderInspectorPage() {
 
           <div className="bg-amber-900/20 border border-amber-800 rounded-xl p-6">
             <div className="text-center">
-              <div className="text-3xl font-bold text-amber-400">$0.001</div>
+              <div className="text-3xl font-bold text-amber-400">0.001 USDC</div>
               <p className="text-sm text-gray-500 mt-1">Price per email</p>
               <div className="mt-2 text-xs text-gray-600">
-                Asset: USDC • Network: base-sepolia
+                Network: base-sepolia
               </div>
             </div>
           </div>
@@ -242,8 +242,21 @@ export default function ProviderInspectorPage() {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <span className="text-purple-400">📜</span> Request/Response Log
+              {providerLogs.length > 0 && (
+                <span className="text-xs bg-gray-700 px-2 py-1 rounded-full ml-2">
+                  {providerLogs.length}
+                </span>
+              )}
             </h2>
             <div className="flex items-center gap-4">
+              {providerLogs.length > 0 && (
+                <button
+                  onClick={() => setProviderLogs([])}
+                  className="text-xs text-gray-500 hover:text-white transition-colors"
+                >
+                  Clear Log
+                </button>
+              )}
               <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
                 <div
                   className={`w-10 h-5 rounded-full transition-colors ${
@@ -257,7 +270,7 @@ export default function ProviderInspectorPage() {
                     } mt-0.5`}
                   />
                 </div>
-                Auto-refresh
+                Live
               </label>
             </div>
           </div>

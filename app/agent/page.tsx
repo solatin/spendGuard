@@ -45,6 +45,7 @@ export default function AgentPage() {
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequirement | null>(null);
   const [currentPaymentProof, setCurrentPaymentProof] = useState<Record<string, unknown> | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const fetchBudget = useCallback(async () => {
     const res = await fetch("/api/budget");
@@ -53,17 +54,12 @@ export default function AgentPage() {
   }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchBudget();
-    }, 0);
-    
-    const interval = setInterval(fetchBudget, 2000);
-    
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(interval);
-    };
-  }, [fetchBudget]);
+    fetchBudget();
+    if (autoRefresh) {
+      const interval = setInterval(fetchBudget, 1500);
+      return () => clearInterval(interval);
+    }
+  }, [fetchBudget, autoRefresh]);
 
   const toggleExpand = (stepId: string) => {
     setExpandedSteps((prev) => {
@@ -423,9 +419,42 @@ export default function AgentPage() {
 
         {/* Timeline */}
         <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-            <span className="text-purple-400">📜</span> Activity Log
-          </h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <span className="text-purple-400">📜</span> Activity Log
+              {steps.length > 0 && (
+                <span className="text-xs bg-gray-700 px-2 py-1 rounded-full ml-2">
+                  {steps.length}
+                </span>
+              )}
+            </h2>
+            <div className="flex items-center gap-4">
+              {steps.length > 0 && (
+                <button
+                  onClick={handleReset}
+                  disabled={isRunning}
+                  className="text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-50"
+                >
+                  Clear Log
+                </button>
+              )}
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
+                <div
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    autoRefresh ? "bg-emerald-600" : "bg-gray-700"
+                  }`}
+                  onClick={() => setAutoRefresh(!autoRefresh)}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${
+                      autoRefresh ? "translate-x-5" : "translate-x-0.5"
+                    } mt-0.5`}
+                  />
+                </div>
+                Live
+              </label>
+            </div>
+          </div>
 
           {steps.length === 0 ? (
             <div className="text-center py-12 text-gray-500">

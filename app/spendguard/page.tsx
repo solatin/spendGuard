@@ -283,34 +283,45 @@ export default function SpendGuardInspectorPage() {
               )}
             </div>
 
-            {/* Auto-refresh toggle */}
-            <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-sm text-gray-400">Auto-refresh logs</span>
-                <div
-                  className={`w-12 h-6 rounded-full transition-colors ${
-                    autoRefresh ? "bg-emerald-600" : "bg-gray-700"
-                  }`}
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                >
-                  <div
-                    className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
-                      autoRefresh ? "translate-x-6" : "translate-x-0.5"
-                    } mt-0.5`}
-                  />
-                </div>
-              </label>
-            </div>
           </div>
 
           {/* Middle: Request Logs */}
           <div className="lg:col-span-2 bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <span className="text-amber-400">📊</span> Decision Logs
-              <span className="text-xs bg-gray-700 px-2 py-1 rounded-full ml-auto">
-                {autoRefresh && "🔄"} Live
-              </span>
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <span className="text-amber-400">📊</span> Decision Logs
+                {logs.length > 0 && (
+                  <span className="text-xs bg-gray-700 px-2 py-1 rounded-full ml-2">
+                    {logs.length}
+                  </span>
+                )}
+              </h2>
+              <div className="flex items-center gap-4">
+                {logs.length > 0 && (
+                  <button
+                    onClick={() => setLogs([])}
+                    className="text-xs text-gray-500 hover:text-white transition-colors"
+                  >
+                    Clear Log
+                  </button>
+                )}
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
+                  <div
+                    className={`w-10 h-5 rounded-full transition-colors ${
+                      autoRefresh ? "bg-emerald-600" : "bg-gray-700"
+                    }`}
+                    onClick={() => setAutoRefresh(!autoRefresh)}
+                  >
+                    <div
+                      className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${
+                        autoRefresh ? "translate-x-5" : "translate-x-0.5"
+                      } mt-0.5`}
+                    />
+                  </div>
+                  Live
+                </label>
+              </div>
+            </div>
 
             <div className="space-y-3 max-h-[600px] overflow-y-auto">
               {logs.length === 0 ? (
