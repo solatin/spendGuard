@@ -45,7 +45,56 @@ export default function AgentPage() {
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequirement | null>(null);
   const [currentPaymentProof, setCurrentPaymentProof] = useState<Record<string, unknown> | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [hasRestored, setHasRestored] = useState(false);
+
+  // Persist agent timeline across navigation (SpendGuard logs are already persisted in Redis)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem("spendguard:agent_state:v1");
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          steps?: TimelineStep[];
+          phase?: "idle" | "awaiting_payment" | "completed" | "denied";
+          paymentRequired?: PaymentRequirement | null;
+          currentPaymentProof?: Record<string, unknown> | null;
+          expandedSteps?: string[];
+        };
+
+        if (Array.isArray(parsed.steps)) setSteps(parsed.steps);
+        if (parsed.phase) setPhase(parsed.phase);
+        if ("paymentRequired" in parsed) setPaymentRequired(parsed.paymentRequired ?? null);
+        if ("currentPaymentProof" in parsed) setCurrentPaymentProof(parsed.currentPaymentProof ?? null);
+        if (Array.isArray(parsed.expandedSteps)) setExpandedSteps(new Set(parsed.expandedSteps));
+      } catch (error) {
+        console.warn("Failed to restore agent state:", error);
+      } finally {
+        setHasRestored(true);
+      }
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    // Important: don't overwrite persisted state with the empty initial render
+    // before we've attempted to restore.
+    if (!hasRestored) return;
+    try {
+      localStorage.setItem(
+        "spendguard:agent_state:v1",
+        JSON.stringify({
+          steps,
+          phase,
+          paymentRequired,
+          currentPaymentProof,
+          expandedSteps: Array.from(expandedSteps),
+        })
+      );
+    } catch (error) {
+      console.warn("Failed to persist agent state:", error);
+    }
+  }, [steps, phase, paymentRequired, currentPaymentProof, expandedSteps, hasRestored]);
 
   const fetchBudget = useCallback(async () => {
     const res = await fetch("/api/budget");
@@ -54,12 +103,15 @@ export default function AgentPage() {
   }, []);
 
   useEffect(() => {
-    fetchBudget();
-    if (autoRefresh) {
-      const interval = setInterval(fetchBudget, 1500);
-      return () => clearInterval(interval);
-    }
-  }, [fetchBudget, autoRefresh]);
+    const timeoutId = setTimeout(() => {
+      fetchBudget();
+    }, 0);
+    const interval = setInterval(fetchBudget, 1500);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
+  }, [fetchBudget]);
 
   const toggleExpand = (stepId: string) => {
     setExpandedSteps((prev) => {
@@ -301,6 +353,11 @@ export default function AgentPage() {
     setPaymentRequired(null);
     setCurrentPaymentProof(null);
     setExpandedSteps(new Set());
+    try {
+      localStorage.removeItem("spendguard:agent_state:v1");
+    } catch {
+      // ignore
+    }
   };
 
   return (
@@ -438,21 +495,6 @@ export default function AgentPage() {
                   Clear Log
                 </button>
               )}
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
-                <div
-                  className={`w-10 h-5 rounded-full transition-colors ${
-                    autoRefresh ? "bg-emerald-600" : "bg-gray-700"
-                  }`}
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${
-                      autoRefresh ? "translate-x-5" : "translate-x-0.5"
-                    } mt-0.5`}
-                  />
-                </div>
-                Live
-              </label>
             </div>
           </div>
 
@@ -474,7 +516,7 @@ export default function AgentPage() {
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 ${
                           step.status === "success"
-                            ? "bg-emerald-500/20 border-emerald-500 text-emerald-400"
+                            ? "bg-emerald-600 border-emerald-400 text-white"
                             : step.status === "error"
                             ? "bg-red-500/20 border-red-500 text-red-400"
                             : step.status === "active"

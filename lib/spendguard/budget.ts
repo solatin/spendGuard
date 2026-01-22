@@ -47,6 +47,13 @@ export async function getBudgetStatus(): Promise<BudgetStatus> {
   };
 }
 
+/**
+ * Clear persisted budget state (reverts to DEFAULT_BUDGET on next read)
+ */
+export async function clearBudget(): Promise<void> {
+  await redis.del(REDIS_KEYS.BUDGET);
+}
+
 export async function checkBudget(amount: number): Promise<BudgetCheckResult> {
   const budgetState = await getBudgetState();
   

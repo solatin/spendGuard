@@ -25,9 +25,14 @@ export default function LogsPage() {
   }, []);
 
   useEffect(() => {
-    fetchLogs();
+    const timeoutId = setTimeout(() => {
+      fetchLogs();
+    }, 0);
     const interval = setInterval(fetchLogs, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
   }, [fetchLogs]);
 
   const handleClearLogs = async () => {

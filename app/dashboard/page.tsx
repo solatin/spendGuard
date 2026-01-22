@@ -46,9 +46,14 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 0);
     const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
   }, [fetchData]);
 
   const handleResetBudget = async () => {

@@ -2,17 +2,21 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-interface ProviderLog {
+interface ProviderExchange {
   id: string;
   timestamp: string;
-  phase: "request_1" | "response_402" | "request_2" | "response_200";
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: Record<string, unknown>;
-  status?: number;
-  statusText?: string;
-  responseBody?: Record<string, unknown>;
+  kind: "payment_required" | "success";
+  request: {
+    method: string;
+    path: string;
+    headers?: Record<string, string>;
+    body?: Record<string, unknown>;
+  };
+  response: {
+    status: number;
+    statusText: string;
+    body?: Record<string, unknown>;
+  };
 }
 
 interface AuditLogEntry {
@@ -32,80 +36,80 @@ interface AuditLogEntry {
 }
 
 export default function ProviderInspectorPage() {
-  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
-  const [providerLogs, setProviderLogs] = useState<ProviderLog[]>([]);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [providerLogs, setProviderLogs] = useState<ProviderExchange[]>([]);
   const [emailCount, setEmailCount] = useState(0);
+  const [isClearing, setIsClearing] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
 
   const fetchLogs = useCallback(async () => {
-    const res = await fetch("/api/logs");
+    const res = await fetch("/api/logs?limit=200");
     const data = await res.json();
-    const recentLogs = data.logs.slice(0, 30) as AuditLogEntry[];
-    setLogs(recentLogs);
+    const recentLogs = (data.logs || []) as AuditLogEntry[];
 
     // Transform audit logs into provider-perspective logs
-    const transformed: ProviderLog[] = [];
+    const transformed: ProviderExchange[] = [];
     let emailId = 1;
 
     recentLogs.forEach((log, index) => {
       const baseId = `prov_${index}`;
 
       if (log.decision === "PAYMENT_REQUIRED") {
-        // First request - returns 402
+        // One exchange: request (no proof) -> 402
         transformed.push({
-          id: `${baseId}_req1`,
+          id: `${baseId}_402`,
           timestamp: log.timestamp,
-          phase: "request_1",
-          method: "POST",
-          path: "/api/provider/email/send",
-          body: log.payload,
-        });
-        transformed.push({
-          id: `${baseId}_res402`,
-          timestamp: log.timestamp,
-          phase: "response_402",
-          method: "POST",
-          path: "/api/provider/email/send",
-          status: 402,
-          statusText: "Payment Required",
-          responseBody: {
-            x402: {
-              price: log.cost,
-              asset: "USDC",
-              network: "base-sepolia",
-              nonce: log.payment_nonce || "nonce_xxx",
+          kind: "payment_required",
+          request: {
+            method: "POST",
+            path: "/api/provider/email/send",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: log.payload,
+          },
+          response: {
+            status: 402,
+            statusText: "Payment Required",
+            body: {
+              x402: {
+                price: log.cost,
+                asset: "USDC",
+                network: "base-sepolia",
+                nonce: log.payment_nonce || "nonce_xxx",
+              },
             },
           },
         });
       } else if (log.decision === "APPROVED" && log.payment_verified) {
-        // Second request with payment - returns 200
+        // One exchange: request (with proof) -> 200
         transformed.push({
-          id: `${baseId}_req2`,
+          id: `${baseId}_200`,
           timestamp: log.timestamp,
-          phase: "request_2",
-          method: "POST",
-          path: "/api/provider/email/send",
-          headers: {
-            "Content-Type": "application/json",
-            "X-PAYMENT-PROOF": log.payment_nonce ? `[verified: ${log.payment_nonce.substring(0, 15)}...]` : "[payment proof]",
-          },
-          body: log.payload,
-        });
-        transformed.push({
-          id: `${baseId}_res200`,
-          timestamp: log.timestamp,
-          phase: "response_200",
-          method: "POST",
-          path: "/api/provider/email/send",
-          status: 200,
-          statusText: "OK",
-          responseBody: log.response || {
-            success: true,
-            data: {
-              status: "sent",
-              id: `email_${emailId++}`,
-              to: (log.payload as { to?: string })?.to || "demo@example.com",
+          kind: "success",
+          request: {
+            method: "POST",
+            path: "/api/provider/email/send",
+            headers: {
+              "Content-Type": "application/json",
+              "X-PAYMENT-PROOF": log.payment_nonce
+                ? `[verified: ${log.payment_nonce.substring(0, 15)}...]`
+                : "[payment proof]",
             },
+            body: log.payload,
+          },
+          response: {
+            status: 200,
+            statusText: "OK",
+            body:
+              log.response || {
+                success: true,
+                data: {
+                  status: "sent",
+                  id: `email_${emailId++}`,
+                  to:
+                    (log.payload as { to?: string })?.to || "demo@example.com",
+                },
+              },
           },
         });
       }
@@ -117,16 +121,28 @@ export default function ProviderInspectorPage() {
     ).length;
     setEmailCount(approvedCount);
 
-    setProviderLogs(transformed.reverse()); // Most recent first
+    // Newest -> oldest
+    transformed.sort((a, b) => {
+      const ta = new Date(a.timestamp).getTime();
+      const tb = new Date(b.timestamp).getTime();
+      return tb - ta;
+    });
+
+    setProviderLogs(transformed);
   }, []);
 
   useEffect(() => {
-    fetchLogs();
-    if (autoRefresh) {
-      const interval = setInterval(fetchLogs, 1500);
-      return () => clearInterval(interval);
-    }
-  }, [fetchLogs, autoRefresh]);
+    const timeoutId = setTimeout(() => {
+      fetchLogs();
+    }, 0);
+
+    const interval = setInterval(fetchLogs, 1500);
+
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
+  }, [fetchLogs]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -137,23 +153,66 @@ export default function ProviderInspectorPage() {
     });
   };
 
-  const getPhaseInfo = (phase: string) => {
-    switch (phase) {
-      case "request_1":
-        return { label: "Request #1", color: "text-cyan-400", bg: "bg-cyan-900/20", icon: "→" };
-      case "response_402":
-        return { label: "402 Payment Required", color: "text-amber-400", bg: "bg-amber-900/20", icon: "←" };
-      case "request_2":
-        return { label: "Request #2 (with proof)", color: "text-purple-400", bg: "bg-purple-900/20", icon: "→" };
-      case "response_200":
-        return { label: "200 OK", color: "text-emerald-400", bg: "bg-emerald-900/20", icon: "←" };
+  const handleClear = async () => {
+    try {
+      setIsClearing(true);
+      setProviderLogs([]);
+      setEmailCount(0);
+      setExpandedLogs(new Set());
+
+      const res = await fetch("/api/spendguard/clear", { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(`clear_failed: ${res.status}`);
+      }
+
+      await fetchLogs();
+    } catch (error) {
+      console.error("Failed to clear provider logs:", error);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedLogs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const getExchangeInfo = (kind: ProviderExchange["kind"]) => {
+    switch (kind) {
+      case "payment_required":
+        return {
+          label: "402 Payment Required",
+          color: "text-amber-400",
+          bg: "bg-amber-900/20",
+          border: "border-amber-800",
+          badge: "bg-amber-900/50 text-amber-400",
+        };
+      case "success":
+        return {
+          label: "200 OK",
+          color: "text-emerald-400",
+          bg: "bg-emerald-900/20",
+          border: "border-emerald-800",
+          badge: "bg-emerald-900/50 text-emerald-400",
+        };
       default:
-        return { label: phase, color: "text-gray-400", bg: "bg-gray-900/20", icon: "•" };
+        return {
+          label: kind,
+          color: "text-gray-400",
+          bg: "bg-gray-900/20",
+          border: "border-gray-700",
+          badge: "bg-gray-800 text-gray-300",
+        };
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 p-8">
+    <main className="min-h-screen bg-linear-to-br from-gray-950 via-gray-900 to-gray-950 p-8">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center space-y-2">
@@ -251,27 +310,13 @@ export default function ProviderInspectorPage() {
             <div className="flex items-center gap-4">
               {providerLogs.length > 0 && (
                 <button
-                  onClick={() => setProviderLogs([])}
-                  className="text-xs text-gray-500 hover:text-white transition-colors"
+                  onClick={handleClear}
+                  disabled={isClearing}
+                  className="text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Clear Log
+                  {isClearing ? "Clearing..." : "Clear Log"}
                 </button>
               )}
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
-                <div
-                  className={`w-10 h-5 rounded-full transition-colors ${
-                    autoRefresh ? "bg-emerald-600" : "bg-gray-700"
-                  }`}
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${
-                      autoRefresh ? "translate-x-5" : "translate-x-0.5"
-                    } mt-0.5`}
-                  />
-                </div>
-                Live
-              </label>
             </div>
           </div>
 
@@ -284,86 +329,101 @@ export default function ProviderInspectorPage() {
           ) : (
             <div className="space-y-4">
               {providerLogs.map((log) => {
-                const phaseInfo = getPhaseInfo(log.phase);
-                const isRequest = log.phase.startsWith("request");
-                const isSuccess = log.status === 200;
-                const is402 = log.status === 402;
+                const info = getExchangeInfo(log.kind);
+                const isExpanded = expandedLogs.has(log.id);
 
                 return (
                   <div
                     key={log.id}
-                    className={`rounded-lg border ${phaseInfo.bg} ${
-                      is402 ? "border-amber-800" : isSuccess ? "border-emerald-800" : "border-gray-700"
-                    }`}
+                    className={`rounded-lg border ${info.bg} ${info.border}`}
                   >
                     {/* Header */}
-                    <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-                      <div className="flex items-center gap-3">
-                        <span className={`text-lg ${phaseInfo.color}`}>{phaseInfo.icon}</span>
-                        <span className={`font-medium ${phaseInfo.color}`}>{phaseInfo.label}</span>
-                        {log.status && (
-                          <span className={`text-xs px-2 py-0.5 rounded ${
-                            is402 ? "bg-amber-900/50 text-amber-400" : "bg-emerald-900/50 text-emerald-400"
-                          }`}>
-                            HTTP {log.status}
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(log.id)}
+                      className="w-full text-left"
+                    >
+                      <div className={`flex items-center justify-between p-4 ${isExpanded ? "border-b border-gray-800/50" : ""}`}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-gray-400 shrink-0">
+                            {isExpanded ? "▾" : "▸"}
                           </span>
-                        )}
+                          <span className={`font-medium ${info.color} shrink-0`}>{info.label}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${info.badge} shrink-0`}>
+                            HTTP {log.response.status}
+                          </span>
+                          <span className="text-xs text-gray-500 font-mono truncate">
+                            {log.request.method} {log.request.path}
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-500 shrink-0">{formatTime(log.timestamp)}</span>
                       </div>
-                      <span className="text-xs text-gray-500">{formatTime(log.timestamp)}</span>
-                    </div>
+                    </button>
 
                     {/* Body */}
-                    <div className="p-4">
-                      {isRequest ? (
-                        <div className="space-y-3">
-                          <div className="text-sm">
-                            <span className="text-gray-500">Endpoint:</span>{" "}
-                            <span className="text-cyan-400 font-mono">{log.method} {log.path}</span>
+                    {isExpanded && (
+                      <div className="p-4">
+                        <div className="space-y-4">
+                          {/* Received */}
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">Received (from SpendGuard)</div>
+                            <div className="text-sm mb-2">
+                              <span className="text-gray-500">Endpoint:</span>{" "}
+                              <span className="text-cyan-400 font-mono">
+                                {log.request.method} {log.request.path}
+                              </span>
+                            </div>
+                            {log.request.headers && (
+                              <div className="mb-3">
+                                <div className="text-xs text-gray-500 mb-1">Headers:</div>
+                                <pre className="bg-gray-950 rounded p-3 text-xs text-gray-300 font-mono">
+{Object.entries(log.request.headers)
+  .map(([k, v]) => `${k}: ${v}`)
+  .join("\n")}
+                                </pre>
+                              </div>
+                            )}
+                            {log.request.body && (
+                              <div>
+                                <div className="text-xs text-gray-500 mb-1">Body:</div>
+                                <pre className="bg-gray-950 rounded p-3 text-xs text-cyan-300 font-mono overflow-x-auto">
+{JSON.stringify(log.request.body, null, 2)}
+                                </pre>
+                              </div>
+                            )}
                           </div>
-                          {log.headers && (
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Headers:</div>
-                              <pre className="bg-gray-950 rounded p-3 text-xs text-gray-300 font-mono">
-{Object.entries(log.headers).map(([k, v]) => `${k}: ${v}`).join("\n")}
-                              </pre>
+
+                          {/* Responded */}
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">Responded (back to SpendGuard)</div>
+                            <div className="text-sm mb-2">
+                              <span className="text-gray-500">Status:</span>{" "}
+                              <span className={log.response.status === 402 ? "text-amber-400" : "text-emerald-400"}>
+                                {log.response.status} {log.response.statusText}
+                              </span>
                             </div>
-                          )}
-                          {log.body && (
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Request Body:</div>
-                              <pre className="bg-gray-950 rounded p-3 text-xs text-cyan-300 font-mono overflow-x-auto">
-{JSON.stringify(log.body, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="text-sm">
-                            <span className="text-gray-500">Status:</span>{" "}
-                            <span className={is402 ? "text-amber-400" : "text-emerald-400"}>
-                              {log.status} {log.statusText}
-                            </span>
+                            {log.response.body && (
+                              <div>
+                                <div className="text-xs text-gray-500 mb-1">Body:</div>
+                                <pre
+                                  className={`bg-gray-950 rounded p-3 text-xs font-mono overflow-x-auto ${
+                                    log.response.status === 402 ? "text-amber-300" : "text-emerald-300"
+                                  }`}
+                                >
+{JSON.stringify(log.response.body, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {log.kind === "success" && (
+                              <div className="flex items-center gap-2 text-emerald-400 text-sm mt-3">
+                                <span>✅</span>
+                                <span>Email sent successfully!</span>
+                              </div>
+                            )}
                           </div>
-                          {log.responseBody && (
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Response Body:</div>
-                              <pre className={`bg-gray-950 rounded p-3 text-xs font-mono overflow-x-auto ${
-                                is402 ? "text-amber-300" : "text-emerald-300"
-                              }`}>
-{JSON.stringify(log.responseBody, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {isSuccess && (
-                            <div className="flex items-center gap-2 text-emerald-400 text-sm mt-2">
-                              <span>✅</span>
-                              <span>Email sent successfully!</span>
-                            </div>
-                          )}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

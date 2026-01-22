@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getLogs, clearLogs, getLogStats } from "@/lib/spendguard/audit";
 
-export async function GET() {
-  const [logs, stats] = await Promise.all([getLogs(), getLogStats()]);
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const limitParam = url.searchParams.get("limit");
+  const parsed = limitParam ? Number(limitParam) : NaN;
+  const limit = Number.isFinite(parsed) ? Math.min(500, Math.max(1, parsed)) : 50;
+
+  const [logs, stats] = await Promise.all([getLogs(limit), getLogStats()]);
 
   return NextResponse.json({
     logs,

@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 
 const navItems = [
   { href: "/", label: "Home", icon: "◉" },
-  { href: "/agent", label: "Agent", icon: "🤖" },
-  { href: "/spendguard", label: "SpendGuard", icon: "🛡️" },
-  { href: "/provider", label: "Provider", icon: "📧" },
+  { href: "/demo", label: "Demo", icon: "▶" },
+  { href: "/test", label: "Test Console", icon: "⚡" },
   { href: "/dashboard", label: "Dashboard", icon: "◈" },
   { href: "/logs", label: "Logs", icon: "☰" },
 ];
@@ -32,7 +31,8 @@ export default function Navigation() {
           {/* Nav Links */}
           <div className="flex items-center gap-1">
             {navItems.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive = pathname === item.href || 
+                (item.href === "/demo" && pathname.startsWith("/demo"));
               return (
                 <Link
                   key={item.href}
@@ -57,5 +57,3 @@ export default function Navigation() {
     </nav>
   );
 }
-
-

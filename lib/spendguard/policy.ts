@@ -35,6 +35,13 @@ export async function getPolicy(): Promise<Policy> {
   return policy || { ...DEFAULT_POLICY };
 }
 
+/**
+ * Clear persisted policy state (reverts to DEFAULT_POLICY on next read)
+ */
+export async function clearPolicy(): Promise<void> {
+  await redis.del(REDIS_KEYS.POLICY);
+}
+
 export async function setPolicy(updates: Partial<Policy>): Promise<Policy> {
   const currentPolicy = await getPolicy();
   const updatedPolicy = { ...currentPolicy, ...updates };

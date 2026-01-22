@@ -31,9 +31,14 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 0);
     const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
   }, [fetchData]);
 
   return (
@@ -85,7 +90,7 @@ export default function HomePage() {
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <Link
-              href="/test"
+              href="/demo"
               className="flex items-center gap-2 px-6 py-3 rounded-lg bg-emerald-500 text-zinc-950 font-mono font-semibold hover:bg-emerald-400 transition-all"
             >
               <span>▶</span>
@@ -104,7 +109,7 @@ export default function HomePage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto">
               <QuickStat
                 label="Budget Remaining"
-                value={budget ? `$${budget.remaining.toFixed(2)}` : "—"}
+                value={budget ? `${budget.remaining.toFixed(4)} USDC` : "—"}
                 status={
                   budget && budget.percentage_used > 80 ? "warning" : "normal"
                 }

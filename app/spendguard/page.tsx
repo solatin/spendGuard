@@ -45,7 +45,7 @@ export default function SpendGuardInspectorPage() {
   const [budget, setBudget] = useState<BudgetStatus | null>(null);
   const [stats, setStats] = useState<LogStats | null>(null);
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [isClearing, setIsClearing] = useState(false);
 
   const fetchData = useCallback(async () => {
     const [logsRes, policyRes, budgetRes] = await Promise.all([
@@ -69,16 +69,13 @@ export default function SpendGuardInspectorPage() {
       fetchData();
     }, 0);
     
-    let interval: NodeJS.Timeout | undefined;
-    if (autoRefresh) {
-      interval = setInterval(fetchData, 1500);
-    }
+    const interval = setInterval(fetchData, 1500);
     
     return () => {
       clearTimeout(timeoutId);
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
-  }, [fetchData, autoRefresh]);
+  }, [fetchData]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -116,6 +113,24 @@ export default function SpendGuardInspectorPage() {
       return log.payment_verified ? "Payment Verified" : "Payment Invalid";
     }
     return "Executed";
+  };
+
+  const handleClear = async () => {
+    try {
+      setIsClearing(true);
+      setSelectedLog(null);
+
+      const res = await fetch("/api/spendguard/clear", { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(`clear_failed: ${res.status}`);
+      }
+
+      await fetchData();
+    } catch (error) {
+      console.error("Failed to clear SpendGuard DB:", error);
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   return (
@@ -299,27 +314,13 @@ export default function SpendGuardInspectorPage() {
               <div className="flex items-center gap-4">
                 {logs.length > 0 && (
                   <button
-                    onClick={() => setLogs([])}
-                    className="text-xs text-gray-500 hover:text-white transition-colors"
+                    onClick={handleClear}
+                    disabled={isClearing}
+                    className="text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Clear Log
+                    {isClearing ? "Clearing..." : "Clear Log"}
                   </button>
                 )}
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400">
-                  <div
-                    className={`w-10 h-5 rounded-full transition-colors ${
-                      autoRefresh ? "bg-emerald-600" : "bg-gray-700"
-                    }`}
-                    onClick={() => setAutoRefresh(!autoRefresh)}
-                  >
-                    <div
-                      className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${
-                        autoRefresh ? "translate-x-5" : "translate-x-0.5"
-                      } mt-0.5`}
-                    />
-                  </div>
-                  Live
-                </label>
               </div>
             </div>
 
@@ -339,6 +340,8 @@ export default function SpendGuardInspectorPage() {
                         ? "bg-gray-800 border-cyan-700"
                         : log.decision === "PAYMENT_REQUIRED"
                         ? "bg-amber-900/10 border-amber-800 hover:border-amber-700"
+                        : log.decision === "APPROVED"
+                        ? "bg-emerald-900/15 border-emerald-800 hover:border-emerald-700"
                         : "bg-gray-800/50 border-gray-700 hover:border-gray-600"
                     }`}
                   >
