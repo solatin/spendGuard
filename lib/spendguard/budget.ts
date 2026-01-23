@@ -76,14 +76,26 @@ export async function deductBudget(amount: number): Promise<BudgetStatus> {
   const budgetState = await getBudgetState();
   budgetState.remaining = Math.max(0, budgetState.remaining - amount);
   await setBudgetState(budgetState);
-  return getBudgetStatus();
+  const spent = budgetState.daily_limit - budgetState.remaining;
+  return {
+    daily_limit: budgetState.daily_limit,
+    remaining: budgetState.remaining,
+    spent,
+    percentage_used: (spent / budgetState.daily_limit) * 100,
+  };
 }
 
 export async function resetBudget(): Promise<BudgetStatus> {
   const budgetState = await getBudgetState();
   budgetState.remaining = budgetState.daily_limit;
   await setBudgetState(budgetState);
-  return getBudgetStatus();
+  const spent = budgetState.daily_limit - budgetState.remaining;
+  return {
+    daily_limit: budgetState.daily_limit,
+    remaining: budgetState.remaining,
+    spent,
+    percentage_used: (spent / budgetState.daily_limit) * 100,
+  };
 }
 
 export async function setDailyLimit(limit: number): Promise<BudgetStatus> {
@@ -92,5 +104,11 @@ export async function setDailyLimit(limit: number): Promise<BudgetStatus> {
     remaining: limit,
   };
   await setBudgetState(budgetState);
-  return getBudgetStatus();
+  const spent = budgetState.daily_limit - budgetState.remaining;
+  return {
+    daily_limit: budgetState.daily_limit,
+    remaining: budgetState.remaining,
+    spent,
+    percentage_used: (spent / budgetState.daily_limit) * 100,
+  };
 }

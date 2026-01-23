@@ -94,11 +94,6 @@ export default function DemoPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ daily_limit: limit }),
     });
-    await fetch("/api/budget", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "reset" }),
-    });
   };
 
   const prepareScenario = async (opts?: {

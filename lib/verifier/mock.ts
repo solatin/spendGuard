@@ -21,16 +21,6 @@ export async function verifyPayment(params: {
 }): Promise<VerifyResult> {
   const { proof, expectedNonce, expectedAmount } = params;
 
-  // Check if nonce has been used (replay attack prevention)
-  const isUsed = await redis.sismember(REDIS_KEYS.USED_NONCES, proof.nonce);
-  if (isUsed) {
-    return {
-      valid: false,
-      reason: "replay_attack: Nonce already used",
-      details: { nonce: proof.nonce },
-    };
-  }
-
   // Check nonce matches expected
   if (proof.nonce !== expectedNonce) {
     return {
@@ -65,8 +55,16 @@ export async function verifyPayment(params: {
     };
   }
 
-  // All checks passed - mark nonce as used
-  await redis.sadd(REDIS_KEYS.USED_NONCES, proof.nonce);
+  // All checks passed - atomically mark nonce as used (replay prevention)
+  // SADD returns 1 if the member was added, 0 if it already existed.
+  const added = await redis.sadd(REDIS_KEYS.USED_NONCES, proof.nonce);
+  if (!added) {
+    return {
+      valid: false,
+      reason: "replay_attack: Nonce already used",
+      details: { nonce: proof.nonce },
+    };
+  }
 
   return {
     valid: true,

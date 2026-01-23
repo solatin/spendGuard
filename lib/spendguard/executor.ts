@@ -63,7 +63,10 @@ export async function executeSpendGuardFlow(
     cost_estimated: costEstimated,
   };
 
-  const policyResult = await checkPolicy(policyRequest);
+  const [policyResult, budgetResult] = await Promise.all([
+    checkPolicy(policyRequest),
+    checkBudget(costEstimated),
+  ]);
 
   if (!policyResult.allowed) {
     const logEntry = await logRequest({
@@ -82,11 +85,6 @@ export async function executeSpendGuardFlow(
       log_id: logEntry.id,
     };
   }
-
-  // ═══════════════════════════════════════════════════════════
-  // STEP 2: Budget Check
-  // ═══════════════════════════════════════════════════════════
-  const budgetResult = await checkBudget(costEstimated);
 
   if (!budgetResult.allowed) {
     const logEntry = await logRequest({
@@ -130,33 +128,32 @@ export async function executeSpendGuardFlow(
       };
     }
 
-    // Fast-path replay prevention: if nonce is already used, deny even if pending payment was deleted.
-    // This keeps the user-facing behavior consistent with "replay_attack" scenarios.
-    if (await isNonceUsed(proof.nonce)) {
-      const logEntry = await logRequest({
-        provider,
-        action,
-        task,
-        cost: costEstimated,
-        decision: "DENIED",
-        reason: "replay_attack: Nonce already used",
-        payload,
-        payment_nonce: proof.nonce,
-        payment_payer: proof.payer,
-        payment_verified: false,
-      });
-
-      return {
-        decision: "DENIED",
-        reason: "replay_attack: Nonce already used",
-        log_id: logEntry.id,
-      };
-    }
-
     // Get pending payment requirement
     const pendingPayment = await getPendingPayment(proof.nonce);
 
     if (!pendingPayment) {
+      // Preserve "replay_attack" semantics even if the pending payment was deleted/expired.
+      if (await isNonceUsed(proof.nonce)) {
+        const logEntry = await logRequest({
+          provider,
+          action,
+          task,
+          cost: costEstimated,
+          decision: "DENIED",
+          reason: "replay_attack: Nonce already used",
+          payload,
+          payment_nonce: proof.nonce,
+          payment_payer: proof.payer,
+          payment_verified: false,
+        });
+
+        return {
+          decision: "DENIED",
+          reason: "replay_attack: Nonce already used",
+          log_id: logEntry.id,
+        };
+      }
+
       const logEntry = await logRequest({
         provider,
         action,
@@ -214,11 +211,8 @@ export async function executeSpendGuardFlow(
     );
 
     if (providerResult.status === 200) {
-      // Deduct budget AFTER successful execution
-      await deductBudget(costEstimated);
-
-      // Remove pending payment to prevent reuse
-      await removePendingPayment(proof.nonce);
+      // Deduct budget + remove pending payment AFTER successful execution
+      await Promise.all([deductBudget(costEstimated), removePendingPayment(proof.nonce)]);
 
       const logEntry = await logRequest({
         provider,
