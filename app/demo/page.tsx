@@ -34,6 +34,7 @@ interface AuditLogEntry {
   decision: "APPROVED" | "DENIED" | "PAYMENT_REQUIRED";
   reason: string;
   timestamp: string;
+  run_id?: string;
   payload?: Record<string, unknown>;
   response?: Record<string, unknown>;
   payment_nonce?: string;
@@ -42,6 +43,12 @@ interface AuditLogEntry {
 }
 
 export default function DemoPage() {
+  const generateRunId = () => {
+    const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (c?.randomUUID) return c.randomUUID();
+    return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  };
+
   const [budget, setBudget] = useState<BudgetStatus | null>(null);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -52,6 +59,7 @@ export default function DemoPage() {
   const [isPreparingScenario, setIsPreparingScenario] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string>(() => generateRunId());
 
   const fetchBudget = useCallback(async () => {
     const res = await fetch("/api/budget");
@@ -59,14 +67,21 @@ export default function DemoPage() {
     setBudget(data);
   }, []);
 
-  const fetchLogs = useCallback(async () => {
-    const res = await fetch("/api/logs?limit=100");
+  const fetchLogs = useCallback(async (overrideRunId?: string) => {
+    const rid = overrideRunId ?? runId ?? undefined;
+    if (!rid) {
+      setLogs([]);
+      return;
+    }
+    const qs = new URLSearchParams({ limit: "100" });
+    if (rid) qs.set("run_id", rid);
+    const res = await fetch(`/api/logs?${qs.toString()}`);
     const data = await res.json();
     setLogs((data.logs || []) as AuditLogEntry[]);
-  }, []);
+  }, [runId]);
 
-  const refreshLogsProgress = useCallback(async () => {
-    await fetchLogs();
+  const refreshLogsProgress = useCallback(async (overrideRunId?: string) => {
+    await fetchLogs(overrideRunId);
     setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, [fetchLogs]);
 
@@ -83,10 +98,11 @@ export default function DemoPage() {
   useEffect(() => {
     // Fetch once on mount (no polling).
     void (async () => {
-      await Promise.all([fetchBudget(), fetchLogs()]);
+      setLogs([]);
+      await fetchBudget();
       setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
     })();
-  }, [fetchBudget, fetchLogs]);
+  }, [fetchBudget]);
 
   const setBudgetLimitAndReset = async (limit: number) => {
     await fetch("/api/budget", {
@@ -98,20 +114,18 @@ export default function DemoPage() {
 
   const prepareScenario = async (opts?: {
     dailyLimit?: number;
-    clearLogs?: boolean;
     clearNonces?: boolean;
   }) => {
     setIsPreparingScenario(true);
     setExpandedLogId(null);
 
     try {
-      const clearLogs = opts?.clearLogs ?? true;
+      const nextRunId = generateRunId();
+      setRunId(nextRunId);
+      setLogs([]);
       const clearNonces = opts?.clearNonces ?? true;
 
-      // Clean slate: logs + payment nonces/pending payments (unless explicitly skipped).
-      if (clearLogs) {
-        await fetch("/api/logs", { method: "DELETE" });
-      }
+      // Clean slate for scenario state (nonces/pending payments) (unless explicitly skipped).
       if (clearNonces) {
         await fetch("/api/budget", {
           method: "POST",
@@ -124,8 +138,9 @@ export default function DemoPage() {
       const limit = opts?.dailyLimit ?? 1.0;
       await setBudgetLimitAndReset(limit);
 
-      await Promise.all([fetchLogs(), fetchBudget()]);
+      await Promise.all([fetchLogs(nextRunId), fetchBudget()]);
       setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      return nextRunId;
     } finally {
       setIsPreparingScenario(false);
     }
@@ -151,12 +166,13 @@ export default function DemoPage() {
     setCurrentScenario("normal");
     setStatusText("Resetting logs/budget, then running normal x402 flow...");
 
+    let rid: string | undefined;
     try {
-      await prepareScenario({ dailyLimit: 1.0 });
+      rid = await prepareScenario({ dailyLimit: 1.0 });
 
       const response1 = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -170,7 +186,7 @@ export default function DemoPage() {
       if (result1.decision !== "PAYMENT_REQUIRED" || !result1.x402_payment_required) {
         throw new Error(`Expected 402, got ${result1.decision}`);
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       setStatusText("Received 402, signing proof...");
       const paymentProof = signPaymentProof(result1.x402_payment_required);
@@ -182,6 +198,7 @@ export default function DemoPage() {
         headers: {
           "Content-Type": "application/json",
           "X-PAYMENT-PROOF": paymentProof,
+          "X-RUN-ID": rid,
         },
         body: JSON.stringify({
           provider: "email",
@@ -196,14 +213,14 @@ export default function DemoPage() {
       if (result2.decision !== "APPROVED") {
         throw new Error(result2.reason);
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       setStatusText("Done. Check SpendGuard logs below (and other tabs).");
     } catch (error) {
       console.error("Normal flow error:", error);
       setStatusText("Normal flow failed. Check SpendGuard logs below.");
     } finally {
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setIsRunning(false);
     }
   };
@@ -214,12 +231,13 @@ export default function DemoPage() {
     setCurrentScenario("policy_violation");
     setStatusText("Resetting logs/budget, then running policy violation scenario...");
 
+    let rid: string | undefined;
     try {
-      await prepareScenario({ dailyLimit: 1.0 });
+      rid = await prepareScenario({ dailyLimit: 1.0 });
 
       const response = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "sms", // Not in allowlist
           action: "send",
@@ -229,13 +247,13 @@ export default function DemoPage() {
       });
 
       await response.json();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setStatusText("Done. Check SpendGuard logs below.");
     } catch (error) {
       console.error("Policy violation error:", error);
       setStatusText("Policy violation run failed. Check SpendGuard logs below.");
     } finally {
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setIsRunning(false);
     }
   };
@@ -246,14 +264,15 @@ export default function DemoPage() {
     setCurrentScenario("budget_exhausted");
     setStatusText("Resetting logs/budget, then running budget exhausted scenario...");
 
+    let rid: string | undefined;
     try {
       // Start clean at the default budget before we prime and compute the correct scenario limit.
-      await prepareScenario({ dailyLimit: 1.0 });
+      rid = await prepareScenario({ dailyLimit: 1.0 });
 
       // Prime a 402 to learn the live per-call price (so this keeps working if pricing changes)
       const primeRes = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -266,7 +285,7 @@ export default function DemoPage() {
       if (prime.decision !== "PAYMENT_REQUIRED" || !prime.x402_payment_required) {
         throw new Error(`Expected 402 prime, got ${prime.decision}`);
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       const price = prime.x402_payment_required.price;
       const scenarioLimit = Number((price * 2).toFixed(6)); // allow exactly 2 paid executions
@@ -275,7 +294,7 @@ export default function DemoPage() {
       // IMPORTANT: do NOT clear nonces/pending payments here, or we'd delete the primed nonce.
       await setBudgetLimitAndReset(scenarioLimit);
       await fetchBudget();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       setStatusText(`Daily limit set to ${scenarioLimit.toFixed(6)} (2x price). Paying twice to drain budget...`);
 
@@ -283,7 +302,7 @@ export default function DemoPage() {
       const proof1 = signPaymentProof(prime.x402_payment_required);
       const paid1 = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-PAYMENT-PROOF": proof1 },
+        headers: { "Content-Type": "application/json", "X-PAYMENT-PROOF": proof1, "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -293,12 +312,12 @@ export default function DemoPage() {
       });
       await paid1.json();
       await fetchBudget();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       // 2) Get a second nonce, then pay it (spends 2x price total)
       const res2 = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -310,12 +329,12 @@ export default function DemoPage() {
       if (r2.decision !== "PAYMENT_REQUIRED" || !r2.x402_payment_required) {
         throw new Error(`Expected 402 second, got ${r2.decision}`);
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       const proof2 = signPaymentProof(r2.x402_payment_required);
       const paid2 = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-PAYMENT-PROOF": proof2 },
+        headers: { "Content-Type": "application/json", "X-PAYMENT-PROOF": proof2, "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -325,12 +344,12 @@ export default function DemoPage() {
       });
       await paid2.json();
       await fetchBudget();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       // 3) One more attempt should DENY immediately on budget check
       const denyRes = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -342,7 +361,7 @@ export default function DemoPage() {
       if (deny.decision !== "DENIED") {
         throw new Error(`Expected budget DENY, got ${deny.decision}`);
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       // Leave the budget exhausted (remaining should be ~0) so the UI reflects the scenario outcome.
       await fetchBudget();
@@ -351,7 +370,7 @@ export default function DemoPage() {
       console.error("Budget exhausted error:", error);
       setStatusText("Budget exhausted run failed. Check SpendGuard logs below.");
     } finally {
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setIsRunning(false);
     }
   };
@@ -362,12 +381,13 @@ export default function DemoPage() {
     setCurrentScenario("replay_attack");
     setStatusText("Resetting logs/budget, then running replay attack scenario...");
 
+    let rid: string | undefined;
     try {
-      await prepareScenario({ dailyLimit: 1.0 });
+      rid = await prepareScenario({ dailyLimit: 1.0 });
 
       const res1 = await fetch("/api/spendguard/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-RUN-ID": rid },
         body: JSON.stringify({
           provider: "email",
           action: "send",
@@ -381,7 +401,7 @@ export default function DemoPage() {
       if (!result1.x402_payment_required) {
         throw new Error("Expected 402");
       }
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       setStatusText("Paying once, then attempting replay...");
 
@@ -392,6 +412,7 @@ export default function DemoPage() {
         headers: {
           "Content-Type": "application/json",
           "X-PAYMENT-PROOF": paymentProof,
+          "X-RUN-ID": rid,
         },
         body: JSON.stringify({
           provider: "email",
@@ -402,13 +423,14 @@ export default function DemoPage() {
       });
 
       await res2.json();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
 
       const res3 = await fetch("/api/spendguard/execute", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-PAYMENT-PROOF": paymentProof, // Same proof!
+          "X-RUN-ID": rid,
         },
         body: JSON.stringify({
           provider: "email",
@@ -419,13 +441,13 @@ export default function DemoPage() {
       });
 
       await res3.json();
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setStatusText("Done. Replay result is in SpendGuard logs below.");
     } catch (error) {
       console.error("Replay attack error:", error);
       setStatusText("Replay attack run failed. Check SpendGuard logs below.");
     } finally {
-      await refreshLogsProgress();
+      await refreshLogsProgress(rid);
       setIsRunning(false);
     }
   };
@@ -433,9 +455,13 @@ export default function DemoPage() {
   const handleClearLogs = async () => {
     try {
       setIsClearingLogs(true);
-      await fetch("/api/logs", { method: "DELETE" });
-      await fetchLogs();
-      setStatusText("Logs cleared.");
+      const nextRunId = generateRunId();
+      setRunId(nextRunId);
+      setExpandedLogId(null);
+      setLogs([]);
+      await fetchLogs(nextRunId);
+      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      setStatusText("Scenario log view cleared (new run).");
     } catch (error) {
       console.error("Failed to clear logs:", error);
       setStatusText("Failed to clear logs. See console for details.");

@@ -46,9 +46,11 @@ export interface ExecuteResult {
  */
 export async function executeSpendGuardFlow(
   request: ExecuteRequest,
-  paymentProofHeader: string | null
+  paymentProofHeader: string | null,
+  opts?: { runId?: string }
 ): Promise<ExecuteResult> {
   const { provider, action, task, payload } = request;
+  const runId = opts?.runId;
 
   // Get cost from provider config
   const costEstimated = EMAIL_PROVIDER_CONFIG.pricePerCall;
@@ -76,6 +78,7 @@ export async function executeSpendGuardFlow(
       cost: costEstimated,
       decision: "DENIED",
       reason: policyResult.reason,
+      run_id: runId,
       payload,
     });
 
@@ -94,6 +97,7 @@ export async function executeSpendGuardFlow(
       cost: costEstimated,
       decision: "DENIED",
       reason: budgetResult.reason,
+      run_id: runId,
       payload,
     });
 
@@ -118,6 +122,7 @@ export async function executeSpendGuardFlow(
         cost: costEstimated,
         decision: "DENIED",
         reason: "invalid_payment_proof: Could not parse payment proof",
+        run_id: runId,
         payload,
       });
 
@@ -141,6 +146,7 @@ export async function executeSpendGuardFlow(
           cost: costEstimated,
           decision: "DENIED",
           reason: "replay_attack: Nonce already used",
+          run_id: runId,
           payload,
           payment_nonce: proof.nonce,
           payment_payer: proof.payer,
@@ -161,6 +167,7 @@ export async function executeSpendGuardFlow(
         cost: costEstimated,
         decision: "DENIED",
         reason: "payment_not_found: No pending payment for this nonce",
+        run_id: runId,
         payload,
         payment_nonce: proof.nonce,
         payment_payer: proof.payer,
@@ -189,6 +196,7 @@ export async function executeSpendGuardFlow(
         cost: costEstimated,
         decision: "DENIED",
         reason: verifyResult.reason,
+        run_id: runId,
         payload,
         payment_nonce: proof.nonce,
         payment_payer: proof.payer,
@@ -221,6 +229,7 @@ export async function executeSpendGuardFlow(
         cost: costEstimated,
         decision: "APPROVED",
         reason: "payment_verified",
+        run_id: runId,
         payload,
         response: providerResult.body as Record<string, unknown>,
         payment_nonce: proof.nonce,
@@ -244,6 +253,7 @@ export async function executeSpendGuardFlow(
       cost: costEstimated,
       decision: "DENIED",
       reason: `provider_error: ${(providerResult.body as { error?: string }).error || "unknown"}`,
+      run_id: runId,
       payload,
       payment_nonce: proof.nonce,
       payment_payer: proof.payer,
@@ -272,6 +282,7 @@ export async function executeSpendGuardFlow(
       cost: costEstimated,
       decision: "PAYMENT_REQUIRED",
       reason: "x402_payment_required",
+      run_id: runId,
       payload,
       payment_nonce: x402.nonce,
     });
@@ -292,6 +303,7 @@ export async function executeSpendGuardFlow(
     cost: costEstimated,
     decision: "DENIED",
     reason: `unexpected_provider_response: status ${providerResult.status}`,
+    run_id: runId,
     payload,
   });
 

@@ -14,6 +14,7 @@ export interface AuditLogEntry {
   decision: Decision;
   reason: string;
   timestamp: string;
+  run_id?: string;
   payload?: Record<string, unknown>;
   response?: Record<string, unknown>;
   payment_nonce?: string;
@@ -47,14 +48,24 @@ export async function logRequest(
   return logEntry;
 }
 
-export async function getLogs(limit: number = 50): Promise<AuditLogEntry[]> {
-  const rawLogs = await redis.lrange(REDIS_KEYS.AUDIT_LOGS, 0, limit - 1);
-  return rawLogs.map((log) => {
-    if (typeof log === "string") {
-      return JSON.parse(log) as AuditLogEntry;
-    }
-    return log as AuditLogEntry;
-  });
+function parseLog(log: unknown): AuditLogEntry {
+  if (typeof log === "string") {
+    return JSON.parse(log) as AuditLogEntry;
+  }
+  return log as AuditLogEntry;
+}
+
+export async function getLogs(
+  limit: number = 50,
+  runId?: string
+): Promise<AuditLogEntry[]> {
+  // If runId is provided, fetch a small bounded window and filter in-memory.
+  // (We only keep MAX_LOGS anyway.)
+  const fetchCount = runId ? MAX_LOGS : limit;
+  const rawLogs = await redis.lrange(REDIS_KEYS.AUDIT_LOGS, 0, fetchCount - 1);
+  const parsed = rawLogs.map(parseLog);
+  if (!runId) return parsed;
+  return parsed.filter((l) => l.run_id === runId).slice(0, limit);
 }
 
 export async function clearLogs(): Promise<void> {
@@ -62,13 +73,13 @@ export async function clearLogs(): Promise<void> {
   await redis.set(REDIS_KEYS.LOG_COUNTER, 0);
 }
 
-export async function getLogStats(): Promise<{
+export async function getLogStats(runId?: string): Promise<{
   total: number;
   approved: number;
   denied: number;
   paymentRequired: number;
 }> {
-  const logs = await getLogs(MAX_LOGS);
+  const logs = await getLogs(MAX_LOGS, runId);
   
   return {
     total: logs.length,

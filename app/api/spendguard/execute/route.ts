@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
 
     // Get payment proof header if present
     const paymentProofHeader = request.headers.get("X-PAYMENT-PROOF");
+    const runIdHeader = request.headers.get("X-RUN-ID") || undefined;
 
     // Execute the SpendGuard flow
     const result = await executeSpendGuardFlow(
@@ -33,7 +34,8 @@ export async function POST(request: NextRequest) {
         task,
         payload: payload || {},
       },
-      paymentProofHeader
+      paymentProofHeader,
+      { runId: runIdHeader }
     );
 
     // Return appropriate HTTP status based on decision
