@@ -65,6 +65,11 @@ export default function DemoPage() {
     setLogs((data.logs || []) as AuditLogEntry[]);
   }, []);
 
+  const refreshLogsProgress = useCallback(async () => {
+    await fetchLogs();
+    setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+  }, [fetchLogs]);
+
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
@@ -127,6 +132,7 @@ export default function DemoPage() {
       await setBudgetLimitAndReset(limit);
 
       await Promise.all([fetchLogs(), fetchBudget()]);
+      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } finally {
       setIsPreparingScenario(false);
     }
@@ -172,6 +178,7 @@ export default function DemoPage() {
       if (result1.decision !== "PAYMENT_REQUIRED" || !result1.x402_payment_required) {
         throw new Error(`Expected 402, got ${result1.decision}`);
       }
+      await refreshLogsProgress();
 
       setStatusText("Received 402, signing proof...");
       await delay(300);
@@ -199,15 +206,14 @@ export default function DemoPage() {
       if (result2.decision !== "APPROVED") {
         throw new Error(result2.reason);
       }
+      await refreshLogsProgress();
 
       setStatusText("Done. Check SpendGuard logs below (and other tabs).");
     } catch (error) {
       console.error("Normal flow error:", error);
       setStatusText("Normal flow failed. Check SpendGuard logs below.");
     } finally {
-      // No polling: refresh logs once after the scenario completes.
-      await fetchLogs();
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      await refreshLogsProgress();
       setIsRunning(false);
     }
   };
@@ -234,13 +240,13 @@ export default function DemoPage() {
       });
 
       await response.json();
+      await refreshLogsProgress();
       setStatusText("Done. Check SpendGuard logs below.");
     } catch (error) {
       console.error("Policy violation error:", error);
       setStatusText("Policy violation run failed. Check SpendGuard logs below.");
     } finally {
-      await fetchLogs();
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      await refreshLogsProgress();
       setIsRunning(false);
     }
   };
@@ -271,6 +277,7 @@ export default function DemoPage() {
       if (prime.decision !== "PAYMENT_REQUIRED" || !prime.x402_payment_required) {
         throw new Error(`Expected 402 prime, got ${prime.decision}`);
       }
+      await refreshLogsProgress();
 
       const price = prime.x402_payment_required.price;
       const scenarioLimit = Number((price * 2).toFixed(6)); // allow exactly 2 paid executions
@@ -279,6 +286,7 @@ export default function DemoPage() {
       // IMPORTANT: do NOT clear nonces/pending payments here, or we'd delete the primed nonce.
       await setBudgetLimitAndReset(scenarioLimit);
       await fetchBudget();
+      await refreshLogsProgress();
 
       setStatusText(`Daily limit set to ${scenarioLimit.toFixed(6)} (2x price). Paying twice to drain budget...`);
       await delay(200);
@@ -297,6 +305,7 @@ export default function DemoPage() {
       });
       await paid1.json();
       await fetchBudget();
+      await refreshLogsProgress();
       await delay(200);
 
       // 2) Get a second nonce, then pay it (spends 2x price total)
@@ -314,6 +323,7 @@ export default function DemoPage() {
       if (r2.decision !== "PAYMENT_REQUIRED" || !r2.x402_payment_required) {
         throw new Error(`Expected 402 second, got ${r2.decision}`);
       }
+      await refreshLogsProgress();
 
       const proof2 = signPaymentProof(r2.x402_payment_required);
       const paid2 = await fetch("/api/spendguard/execute", {
@@ -328,6 +338,7 @@ export default function DemoPage() {
       });
       await paid2.json();
       await fetchBudget();
+      await refreshLogsProgress();
       await delay(200);
 
       // 3) One more attempt should DENY immediately on budget check
@@ -345,6 +356,7 @@ export default function DemoPage() {
       if (deny.decision !== "DENIED") {
         throw new Error(`Expected budget DENY, got ${deny.decision}`);
       }
+      await refreshLogsProgress();
 
       // Leave the budget exhausted (remaining should be ~0) so the UI reflects the scenario outcome.
       await fetchBudget();
@@ -353,8 +365,7 @@ export default function DemoPage() {
       console.error("Budget exhausted error:", error);
       setStatusText("Budget exhausted run failed. Check SpendGuard logs below.");
     } finally {
-      await fetchLogs();
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      await refreshLogsProgress();
       setIsRunning(false);
     }
   };
@@ -385,6 +396,7 @@ export default function DemoPage() {
       if (!result1.x402_payment_required) {
         throw new Error("Expected 402");
       }
+      await refreshLogsProgress();
 
       setStatusText("Paying once, then attempting replay...");
       await delay(300);
@@ -406,6 +418,7 @@ export default function DemoPage() {
       });
 
       await res2.json();
+      await refreshLogsProgress();
       await delay(500);
 
       const res3 = await fetch("/api/spendguard/execute", {
@@ -423,13 +436,13 @@ export default function DemoPage() {
       });
 
       await res3.json();
+      await refreshLogsProgress();
       setStatusText("Done. Replay result is in SpendGuard logs below.");
     } catch (error) {
       console.error("Replay attack error:", error);
       setStatusText("Replay attack run failed. Check SpendGuard logs below.");
     } finally {
-      await fetchLogs();
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour12: false }));
+      await refreshLogsProgress();
       setIsRunning(false);
     }
   };
