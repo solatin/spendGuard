@@ -265,8 +265,6 @@ export default function AgentPage() {
     );
   };
 
-  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
   // Sign mock payment proof
   const defaultPaymentProof = (requirement: PaymentRequirement) => {
     return {
@@ -319,7 +317,6 @@ export default function AgentPage() {
         timestamp: new Date().toISOString(),
         executeRequest: execReq,
       });
-      await delay(300);
 
       const requestBody = JSON.stringify(execReq, null, 2);
       updateStep("send_request", {
@@ -342,14 +339,12 @@ export default function AgentPage() {
       });
 
       // Step 2: Agent receives response
-      await delay(200);
       addStep({
         id: "receive_response",
         name: "📥 Receive Response",
         status: "active",
         timestamp: new Date().toISOString(),
       });
-      await delay(300);
 
       if (result.decision === "DENIED") {
         updateStep("receive_response", {
@@ -425,7 +420,6 @@ export default function AgentPage() {
         timestamp: new Date().toISOString(),
         description: "Preparing locally...",
       });
-      await delay(400);
 
       setCurrentPaymentProof(decodedProof);
 
@@ -444,7 +438,6 @@ export default function AgentPage() {
       });
 
       // Step 4: Agent retries with payment proof
-      await delay(200);
       addStep({
         id: "retry_request",
         name: "📤 Retry with Payment",
@@ -452,7 +445,6 @@ export default function AgentPage() {
         timestamp: new Date().toISOString(),
         executeRequest: execReq,
       });
-      await delay(300);
 
       const requestBody = JSON.stringify(execReq, null, 2);
       updateStep("retry_request", {
@@ -478,14 +470,12 @@ export default function AgentPage() {
       });
 
       // Step 5: Agent receives final response
-      await delay(200);
       addStep({
         id: "final_response",
         name: "📥 Final Response",
         status: "active",
         timestamp: new Date().toISOString(),
       });
-      await delay(300);
 
       if (result.decision === "APPROVED") {
         updateStep("final_response", {

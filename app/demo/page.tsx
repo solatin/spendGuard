@@ -88,8 +88,6 @@ export default function DemoPage() {
     })();
   }, [fetchBudget, fetchLogs]);
 
-  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
   const setBudgetLimitAndReset = async (limit: number) => {
     await fetch("/api/budget", {
       method: "PATCH",
@@ -160,7 +158,6 @@ export default function DemoPage() {
 
     try {
       await prepareScenario({ dailyLimit: 1.0 });
-      await delay(300);
 
       const response1 = await fetch("/api/spendguard/execute", {
         method: "POST",
@@ -181,11 +178,9 @@ export default function DemoPage() {
       await refreshLogsProgress();
 
       setStatusText("Received 402, signing proof...");
-      await delay(300);
       const paymentProof = signPaymentProof(result1.x402_payment_required);
 
       setStatusText("Retrying with payment proof...");
-      await delay(200);
 
       const response2 = await fetch("/api/spendguard/execute", {
         method: "POST",
@@ -226,7 +221,6 @@ export default function DemoPage() {
 
     try {
       await prepareScenario({ dailyLimit: 1.0 });
-      await delay(300);
 
       const response = await fetch("/api/spendguard/execute", {
         method: "POST",
@@ -289,7 +283,6 @@ export default function DemoPage() {
       await refreshLogsProgress();
 
       setStatusText(`Daily limit set to ${scenarioLimit.toFixed(6)} (2x price). Paying twice to drain budget...`);
-      await delay(200);
 
       // 1) Pay the primed nonce (spends 1x price)
       const proof1 = signPaymentProof(prime.x402_payment_required);
@@ -306,7 +299,6 @@ export default function DemoPage() {
       await paid1.json();
       await fetchBudget();
       await refreshLogsProgress();
-      await delay(200);
 
       // 2) Get a second nonce, then pay it (spends 2x price total)
       const res2 = await fetch("/api/spendguard/execute", {
@@ -339,7 +331,6 @@ export default function DemoPage() {
       await paid2.json();
       await fetchBudget();
       await refreshLogsProgress();
-      await delay(200);
 
       // 3) One more attempt should DENY immediately on budget check
       const denyRes = await fetch("/api/spendguard/execute", {
@@ -378,7 +369,6 @@ export default function DemoPage() {
 
     try {
       await prepareScenario({ dailyLimit: 1.0 });
-      await delay(300);
 
       const res1 = await fetch("/api/spendguard/execute", {
         method: "POST",
@@ -399,7 +389,6 @@ export default function DemoPage() {
       await refreshLogsProgress();
 
       setStatusText("Paying once, then attempting replay...");
-      await delay(300);
 
       const paymentProof = signPaymentProof(result1.x402_payment_required);
 
@@ -419,7 +408,6 @@ export default function DemoPage() {
 
       await res2.json();
       await refreshLogsProgress();
-      await delay(500);
 
       const res3 = await fetch("/api/spendguard/execute", {
         method: "POST",
