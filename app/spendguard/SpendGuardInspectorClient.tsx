@@ -629,6 +629,153 @@ export default function SpendGuardInspectorClient() {
                     <div className="text-xs text-gray-500 mt-2 truncate">
                       {log.reason}
                     </div>
+
+                    {selectedLog?.id === log.id && (
+                      <div
+                        className="mt-4 pt-4 border-t border-gray-700 space-y-3"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Decision Path */}
+                        <div>
+                          <div className="text-xs text-gray-500 mb-2">SpendGuard Decision Path</div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="px-2 py-1 bg-purple-900/30 text-purple-400 rounded">
+                              1. Policy{" "}
+                              {(log.reason.includes("provider_not_allowed") ||
+                                log.reason.includes("action_not_allowed") ||
+                                log.reason.includes("task_not_allowed") ||
+                                log.reason.includes("price_exceeded") ||
+                                log.reason.includes("policy"))
+                                ? "❌"
+                                : "✓"}
+                            </span>
+                            <span className="text-gray-600">→</span>
+                            <span className="px-2 py-1 bg-emerald-900/30 text-emerald-400 rounded">
+                              2. Budget {log.reason.includes("budget") ? "❌" : "✓"}
+                            </span>
+                            <span className="text-gray-600">→</span>
+
+                            {log.decision === "PAYMENT_REQUIRED" ? (
+                              <>
+                                <span className="px-2 py-1 bg-amber-900/30 text-amber-400 rounded">
+                                  3. Forward to Provider
+                                </span>
+                                <span className="text-gray-600">→</span>
+                                <span className="px-2 py-1 bg-amber-900/30 text-amber-400 rounded">
+                                  4. Provider returns 402
+                                </span>
+                                <span className="text-gray-600">→</span>
+                                <span className="px-2 py-1 bg-purple-900/30 text-purple-400 rounded font-semibold">
+                                  5. Forward 402 to Agent
+                                </span>
+                              </>
+                            ) : log.decision === "APPROVED" ? (
+                              <>
+                                <span className="px-2 py-1 bg-cyan-900/30 text-cyan-400 rounded">
+                                  3. Verify Payment
+                                </span>
+                                <span className="text-gray-600">→</span>
+                                <span className="px-2 py-1 bg-emerald-900/30 text-emerald-400 rounded">
+                                  4. Execute
+                                </span>
+                              </>
+                            ) : (
+                              <span className="px-2 py-1 bg-red-900/30 text-red-400 rounded">
+                                DENIED
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* x402 Forwarded Payload */}
+                        {log.decision === "PAYMENT_REQUIRED" && log.payment_nonce && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">
+                              x402 Data Forwarded to Agent
+                            </div>
+                            <pre className="bg-amber-950/50 border border-amber-800 rounded-lg p-3 text-xs text-amber-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(
+                                {
+                                  status: 402,
+                                  message: "Payment Required",
+                                  x402: {
+                                    price: log.cost,
+                                    asset: "USDC",
+                                    network: "base-sepolia",
+                                    nonce: log.payment_nonce,
+                                    payTo: "mock_wallet_address",
+                                  },
+                                },
+                                null,
+                                2
+                              )}
+                            </pre>
+                            <p className="mt-2 text-xs text-gray-500 italic">
+                              ↑ This is what SpendGuard forwarded to the Agent (originally from Provider)
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Payment details */}
+                        {(log.payment_nonce || log.payment_payer || log.payment_verified !== undefined) && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">Payment</div>
+                            <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs font-mono">
+                              <div className="text-gray-400">
+                                Nonce:{" "}
+                                <span className="text-cyan-400">
+                                  {log.payment_nonce || "-"}
+                                </span>
+                              </div>
+                              <div className="text-gray-400">
+                                Payer:{" "}
+                                <span className="text-cyan-400">
+                                  {log.payment_payer || "-"}
+                                </span>
+                              </div>
+                              <div className="text-gray-400">
+                                Verified:{" "}
+                                <span
+                                  className={
+                                    log.payment_verified === true
+                                      ? "text-emerald-400"
+                                      : log.payment_verified === false
+                                        ? "text-red-400"
+                                        : "text-gray-500"
+                                  }
+                                >
+                                  {log.payment_verified === true
+                                    ? "YES"
+                                    : log.payment_verified === false
+                                      ? "NO"
+                                      : "-"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Payload */}
+                        {log.payload && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">Payload</div>
+                            <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(log.payload, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Response */}
+                        {log.response && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2">Response</div>
+                            <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-emerald-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(log.response, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -639,5 +786,6 @@ export default function SpendGuardInspectorClient() {
     </main>
   );
 }
+
 
 
