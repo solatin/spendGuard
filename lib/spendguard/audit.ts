@@ -24,14 +24,16 @@ export interface AuditLogEntry {
 
 const MAX_LOGS = 100;
 
+function generateLogId(): string {
+  return `log_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function logRequest(
   entry: Omit<AuditLogEntry, "id" | "timestamp">
 ): Promise<AuditLogEntry> {
   const timestamp = new Date().toISOString();
   
-  // Get and increment counter
-  const counter = await redis.incr(REDIS_KEYS.LOG_COUNTER);
-  const id = `log_${counter}`;
+  const id = generateLogId();
 
   const logEntry: AuditLogEntry = {
     id,
@@ -39,11 +41,11 @@ export async function logRequest(
     ...entry,
   };
 
-  // Add to beginning of list (most recent first)
-  await redis.lpush(REDIS_KEYS.AUDIT_LOGS, JSON.stringify(logEntry));
-  
-  // Trim to keep only last MAX_LOGS entries
-  await redis.ltrim(REDIS_KEYS.AUDIT_LOGS, 0, MAX_LOGS - 1);
+  // Add to beginning of list (most recent first) + trim in a single round trip
+  const pipeline = redis.pipeline();
+  pipeline.lpush(REDIS_KEYS.AUDIT_LOGS, JSON.stringify(logEntry));
+  pipeline.ltrim(REDIS_KEYS.AUDIT_LOGS, 0, MAX_LOGS - 1);
+  await pipeline.exec();
 
   return logEntry;
 }
@@ -69,8 +71,8 @@ export async function getLogs(
 }
 
 export async function clearLogs(): Promise<void> {
-  await redis.del(REDIS_KEYS.AUDIT_LOGS);
-  await redis.set(REDIS_KEYS.LOG_COUNTER, 0);
+  // Keep compatibility even if older deployments created LOG_COUNTER.
+  await Promise.all([redis.del(REDIS_KEYS.AUDIT_LOGS), redis.del(REDIS_KEYS.LOG_COUNTER)]);
 }
 
 export async function getLogStats(runId?: string): Promise<{

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { redis, REDIS_KEYS } from "@/lib/redis";
+import { redis } from "@/lib/redis";
 import { clearLogs } from "@/lib/spendguard/audit";
 import { clearBudget } from "@/lib/spendguard/budget";
 import { clearPolicy } from "@/lib/spendguard/policy";
@@ -24,9 +24,6 @@ export async function DELETE() {
       clearAllPendingPayments(),
       redis.del("spendguard:email_counter"),
     ]);
-
-    // Ensure counters are reset even if keys were missing
-    await redis.set(REDIS_KEYS.LOG_COUNTER, 0);
 
     return NextResponse.json({
       success: true,
